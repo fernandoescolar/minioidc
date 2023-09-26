@@ -1,0 +1,11 @@
+.vscode
+bin
+Dockerfile
+README.md
+LICENSE
+.git
+.gitignore
+.DS_Store
+*.pem
+*.sqlite3
+*.http

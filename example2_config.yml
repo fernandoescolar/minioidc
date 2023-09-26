@@ -1,0 +1,21 @@
+server:
+  issuer: http://localhost:8000/
+  audience: http://localhost:8000/
+  access_ttl: 20 # minutes
+  refresh_ttl: 129600 # 90 days
+  session_ttl: 129600 # 90 days
+  code_ttl: 5 # minutes
+clients:
+  - id: myclient
+    secret_hash: $2a$06$L6/zALdtbkYajjHTZUW29ePBEb/hwhgjhXC4YpHANavvKDJl69ctK # secret
+    redirect_uris:
+     - http://localhost:8080/callback
+users:
+  - subject: 1
+    email: use@mail.com
+    email_verified: true
+    preferred_username: user
+    password_hash: $2a$06$03dduqc0lMbsb5go/l6RI.cRb03Hos9CMpgm5/yYuRsSQPHtrFwSq # password
+    phone:
+    address:
+    groups:

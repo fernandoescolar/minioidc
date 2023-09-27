@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/fernandoescolar/minioidc/api/handlers/responses"
+	"github.com/fernandoescolar/minioidc/internal/api/handlers/responses"
 	"github.com/fernandoescolar/minioidc/pkg/cryptography"
 )
 
@@ -74,6 +74,8 @@ type discoveryResponse struct {
 	ClaimsSupported                   []string `json:"claims_supported"`
 	CodeChallengeMethodsSupported     []string `json:"code_challenge_methods_supported"`
 }
+
+var _ http.Handler = (*DiscoveryHandler)(nil)
 
 func NewDiscoveryHandler(issuer string, authorizationEndpoint string, tokenEndpoint string, jwksEndpoint string, userinfoEndpoint string) *DiscoveryHandler {
 	return &DiscoveryHandler{

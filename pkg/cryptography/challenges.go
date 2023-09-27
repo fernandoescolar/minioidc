@@ -3,7 +3,6 @@ package cryptography
 import (
 	"crypto/sha256"
 	"encoding/base64"
-	"fmt"
 )
 
 const (
@@ -19,6 +18,6 @@ func GenerateCodeChallenge(method, codeVerifier string) (string, error) {
 		shaSum := sha256.Sum256([]byte(codeVerifier))
 		return base64.RawURLEncoding.EncodeToString(shaSum[:]), nil
 	default:
-		return "", fmt.Errorf("unknown challenge method: %v", method)
+		return "", unkownChallengeMethodError(method)
 	}
 }

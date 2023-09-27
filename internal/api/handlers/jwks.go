@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/fernandoescolar/minioidc/api/handlers/responses"
+	"github.com/fernandoescolar/minioidc/internal/api/handlers/responses"
 	"github.com/fernandoescolar/minioidc/pkg/cryptography"
 	"github.com/fernandoescolar/minioidc/pkg/domain"
 	"gopkg.in/square/go-jose.v2"
@@ -13,6 +13,8 @@ import (
 type JWKSHandler struct {
 	keypair *cryptography.Keypair
 }
+
+var _ http.Handler = (*JWKSHandler)(nil)
 
 func NewJWKSHandler(config *domain.Config) *JWKSHandler {
 	return &JWKSHandler{

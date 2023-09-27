@@ -1,0 +1,78 @@
+@host = localhost:8000
+@redirect_uri = http://localhost:8080/callback
+@client_id = myclient
+@client_secret = secret
+@scope = openid%20profile%20email%20offline_access
+@code_challenge = pHEZOnt9SDir39wPbXSr0bxiBtkAQFISimcAuVCTkh8
+@code_challenge_method = S256
+@code_verifier = 7073d688b6dcb02b9a2332e0792be265b9168fda7a6
+@state = 1234zyx
+@authorizeLocation = /connect/authorize?client_id={{client_id}}&response_type=code&scope={{scope}}&code_challenge={{code_challenge}}&code_challenge_method={{code_challenge_method}}&redirect_uri={{redirect_uri}}&state={{state}}
+
+# @name start_challenge
+GET {{authorizeLocation}} HTTP/1.1
+Host: {{host}}
+
+###
+
+@loginLocation = {{start_challenge.response.headers.Location}}
+
+###
+
+# @name get_login
+GET {{loginLocation}} HTTP/1.1
+Host: {{host}}
+Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8
+
+###
+
+# @name do_login
+POST {{loginLocation}} HTTP/1.1
+Host: {{host}}
+Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8
+Content-Type: application/x-www-form-urlencoded
+
+username=user
+&password=password
+
+###
+
+@cookies = {{do_login.response.headers.Set-Cookie}}
+
+# @name start_challenge
+GET {{authorizeLocation}} HTTP/1.1
+Host: {{host}}
+Cookie: {{cookies}}
+Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8
+
+###
+### get code from redirect query string
+###
+
+# @name token_by_code
+POST /connect/token HTTP/1.1
+Host: {{host}}
+Accept: application/json
+Content-Type: application/x-www-form-urlencoded
+Cookie: {{cookies}}
+
+grant_type=authorization_code
+&redirect_uri={{redirect_uri}}
+&code=d43d7a23960c4a3c9df74ac77c39829dc547fa5550a0467db7f7a6936fa5e884
+&code_verifier={{code_verifier}}
+
+###
+
+@refresh_token = {{token_by_code.response.body.refresh_token}}
+
+POST /connect/token HTTP/1.1
+Host: localhost:8000
+Accept: application/json
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=refresh_token
+&client_id=myclient
+&client_secret=secret
+&refresh_token={{refresh_token}}
+
+###

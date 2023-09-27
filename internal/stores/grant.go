@@ -2,6 +2,7 @@ package stores
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -136,12 +137,12 @@ func (gs *miniGrantStore) CleanExpired() {
 func (gs *miniGrantStore) ToGrant(grant *miniGrant) (domain.Grant, error) {
 	session, err := gs.sessionStore.GetSessionByID(grant.sessionID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("ToGrant: %w", err)
 	}
 
 	client, err := gs.clientStore.GetClientByID(grant.clientID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("ToGrant: %w", err)
 	}
 
 	scopes := strings.Split(grant.scopes, " ")

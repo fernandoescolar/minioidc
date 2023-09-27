@@ -5,12 +5,10 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/fernandoescolar/minioidc/api/router"
+	"github.com/fernandoescolar/minioidc/internal/api/router"
 	"github.com/fernandoescolar/minioidc/pkg/domain"
 	"github.com/go-co-op/gocron"
 )
-
-var NowFunc = time.Now
 
 type Minioidc struct {
 	Now    func() time.Time
@@ -19,14 +17,18 @@ type Minioidc struct {
 
 func NewMinioidc(config *domain.Config) (*Minioidc, error) {
 	return &Minioidc{
-		Now:    NowFunc,
+		Now:    time.Now,
 		config: config,
 	}, nil
 }
 
 func (m *Minioidc) Add(mux *http.ServeMux) {
 	scheduler := gocron.NewScheduler(time.UTC)
-	scheduler.Every(1).Hour().Do(m.CleanExpired)
+	_, err := scheduler.Every(1).Hour().Do(m.CleanExpired)
+	if err != nil {
+		log.Println("Error scheduling CleanExpired job:", err)
+	}
+
 	scheduler.StartAsync()
 	defer scheduler.Stop()
 

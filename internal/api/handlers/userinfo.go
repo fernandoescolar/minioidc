@@ -6,17 +6,21 @@ import (
 	"strings"
 	"time"
 
-	"github.com/fernandoescolar/minioidc/api/handlers/responses"
+	"github.com/fernandoescolar/minioidc/internal/api/handlers/responses"
 	"github.com/fernandoescolar/minioidc/pkg/cryptography"
 	"github.com/fernandoescolar/minioidc/pkg/domain"
 	"github.com/golang-jwt/jwt"
 )
+
+const AuthorizationParts = 2
 
 type UserinfoHandler struct {
 	now        func() time.Time
 	keypair    *cryptography.Keypair
 	grantStore domain.GrantStore
 }
+
+var _ http.Handler = (*UserinfoHandler)(nil)
 
 func NewUserinfoHandler(config *domain.Config, now func() time.Time) *UserinfoHandler {
 	return &UserinfoHandler{
@@ -49,8 +53,8 @@ func (h *UserinfoHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (h *UserinfoHandler) authorizeBearer(w http.ResponseWriter, r *http.Request) (*jwt.Token, bool) {
 	header := r.Header.Get("Authorization")
-	parts := strings.SplitN(header, " ", 2)
-	if len(parts) < 2 || parts[0] != "Bearer" {
+	parts := strings.SplitN(header, " ", AuthorizationParts)
+	if len(parts) < AuthorizationParts || parts[0] != "Bearer" {
 		responses.Error(w, responses.InvalidRequest, "Invalid authorization header", http.StatusUnauthorized)
 		return nil, false
 	}

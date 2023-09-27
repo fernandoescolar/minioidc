@@ -2,6 +2,7 @@ package stores
 
 import (
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -41,7 +42,7 @@ func (ss *miniSessionStore) NewSession(sessionID string, user domain.User, expir
 	defer ss.Unlock()
 	ss.store[sessionID] = session
 
-	return ss.ToSession(session)
+	return ss.Session(session)
 }
 
 // GetSessionByID looks up the Session
@@ -53,7 +54,7 @@ func (ss *miniSessionStore) GetSessionByID(id string) (domain.Session, error) {
 	if !ok {
 		return nil, errors.New("session not found")
 	}
-	return ss.ToSession(session)
+	return ss.Session(session)
 }
 
 func (ss *miniSessionStore) DeleteUserSessions(userID string) {
@@ -78,10 +79,10 @@ func (ss *miniSessionStore) CleanExpired() {
 	}
 }
 
-func (ss *miniSessionStore) ToSession(session *miniSession) (domain.Session, error) {
+func (ss *miniSessionStore) Session(session *miniSession) (domain.Session, error) {
 	user, err := ss.userStore.GetUserByID(session.userID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("Session: %w", err)
 	}
 
 	return domain.NewSession(session.id, user, session.expiresAt), nil

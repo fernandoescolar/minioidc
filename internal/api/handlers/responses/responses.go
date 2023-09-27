@@ -32,14 +32,14 @@ func InternalServerError(w http.ResponseWriter, errorMsg string) {
 	Error(w, internalServerError, errorMsg, http.StatusInternalServerError)
 }
 
-func Error(w http.ResponseWriter, error, description string, statusCode int) {
+func Error(w http.ResponseWriter, e, d string, statusCode int) {
 	errJSON := map[string]string{
-		"error":             error,
-		"error_description": description,
+		"error":             e,
+		"error_description": d,
 	}
 	resp, err := json.Marshal(errJSON)
 	if err != nil {
-		http.Error(w, error, http.StatusInternalServerError)
+		http.Error(w, e, http.StatusInternalServerError)
 	}
 
 	NoCache(w)

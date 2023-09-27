@@ -6,8 +6,10 @@ import (
 	"github.com/fernandoescolar/minioidc/pkg/cryptography"
 )
 
+const Arguments = 2
+
 func main() {
-	if len(os.Args) < 2 {
+	if len(os.Args) < Arguments {
 		println("Usage: hasher <plaintext>")
 		os.Exit(1)
 	}

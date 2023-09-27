@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/fernandoescolar/minioidc/api/handlers/responses"
+	"github.com/fernandoescolar/minioidc/internal/api/handlers/responses"
 	"github.com/fernandoescolar/minioidc/pkg/domain"
 )
 
@@ -20,6 +20,8 @@ type AuthorizeHandler struct {
 	grantStore    domain.GrantStore
 	sessionStore  domain.SessionStore
 }
+
+var _ http.Handler = (*AuthorizeHandler)(nil)
 
 func NewAuthorizeHandler(config *domain.Config, now func() time.Time, loginEndpoint string) *AuthorizeHandler {
 	return &AuthorizeHandler{
@@ -38,8 +40,7 @@ func (h *AuthorizeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	valid := assertPresenceInQuery(
-		[]string{"scope", "state", "client_id", "response_type", "redirect_uri"}, w, r)
+	valid := assertPresenceInQuery([]string{"scope", "state", "client_id", "response_type", "redirect_uri"}, w, r)
 	if !valid {
 		return
 	}

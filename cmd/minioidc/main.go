@@ -1,13 +1,16 @@
 package main
 
 import (
+	"errors"
 	"log"
 	"net/http"
 	"os"
+	"time"
 
-	"github.com/fernandoescolar/minioidc/api"
-	"github.com/fernandoescolar/minioidc/pkg/builder"
+	"github.com/fernandoescolar/minioidc/pkg/api"
 )
+
+const timeout = 5 * time.Second
 
 func main() {
 	configfile := os.Getenv("MINIOIDC_CONFIG")
@@ -20,9 +23,12 @@ func main() {
 		addr = ":8000"
 	}
 
-	builder := builder.NewYamlBuilder(configfile)
-	config := builder.Build()
-	minioidc, err := api.NewMinioidc(config)
+	builder, err := api.NewYamlBuilder(configfile)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	minioidc, err := builder.Build()
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -30,9 +36,15 @@ func main() {
 	handler := http.NewServeMux()
 	minioidc.Add(handler)
 
+	server := &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: timeout,
+	}
+
 	log.Printf("Listening http://%v", addr)
-	err = http.ListenAndServe(addr, handler)
-	if err != nil && err != http.ErrServerClosed {
+	err = server.ListenAndServe()
+	if err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatal(err)
 	}
 }

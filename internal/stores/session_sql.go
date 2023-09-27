@@ -2,6 +2,8 @@ package stores
 
 import (
 	"database/sql"
+	"fmt"
+	"log"
 	"time"
 
 	"github.com/fernandoescolar/minioidc/pkg/domain"
@@ -30,10 +32,10 @@ func (ss *sqlSessionStore) NewSession(sessionID string, user domain.User, expire
 
 	_, err := ss.db.Exec("INSERT INTO sessions VALUES(?,?,?);", session.id, session.userID, session.expiresAt)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("NewSession: %w", err)
 	}
 
-	return ss.toSession(session)
+	return ss.Session(session)
 }
 
 // GetSessionByID looks up the Session
@@ -42,26 +44,32 @@ func (ss *sqlSessionStore) GetSessionByID(id string) (domain.Session, error) {
 	row := ss.db.QueryRow("SELECT id, userID, expiresAt FROM sessions WHERE id = ?;", id)
 	err := row.Scan(&session.id, &session.userID, &session.expiresAt)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("GetSessionByID: %w", err)
 	}
 
-	return ss.toSession(session)
+	return ss.Session(session)
 }
 
 // DeleteUserSessions deletes all sessions for a user
 func (ss *sqlSessionStore) DeleteUserSessions(userID string) {
-	ss.db.Exec("DELETE FROM sessions WHERE userID = ?;", userID)
+	_, err := ss.db.Exec("DELETE FROM sessions WHERE userID = ?;", userID)
+	if err != nil {
+		log.Println("WRN DeleteUserSessions: %w", err)
+	}
 }
 
 // CleanExpired deletes all expired sessions
 func (ss *sqlSessionStore) CleanExpired() {
-	ss.db.Exec("DELETE FROM sessions WHERE expiresAt < ?;", time.Now())
+	_, err := ss.db.Exec("DELETE FROM sessions WHERE expiresAt < ?;", time.Now())
+	if err != nil {
+		log.Println("WRN Session CleanExpired: %w", err)
+	}
 }
 
-func (ss *sqlSessionStore) toSession(session *miniSession) (domain.Session, error) {
+func (ss *sqlSessionStore) Session(session *miniSession) (domain.Session, error) {
 	user, err := ss.userStore.GetUserByID(session.userID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("Session: %w", err)
 	}
 
 	return domain.NewSession(session.id, user, session.expiresAt), nil

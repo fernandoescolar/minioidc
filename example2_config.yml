@@ -1,10 +1,5 @@
-server:
-  issuer: http://localhost:8000/
-  audience: http://localhost:8000/
-  access_ttl: 20 # minutes
-  refresh_ttl: 129600 # 90 days
-  session_ttl: 129600 # 90 days
-  code_ttl: 5 # minutes
+issuer: http://localhost:8000/
+audience: http://localhost:8000/
 clients:
   - id: myclient
     secret_hash: $2a$06$L6/zALdtbkYajjHTZUW29ePBEb/hwhgjhXC4YpHANavvKDJl69ctK # secret

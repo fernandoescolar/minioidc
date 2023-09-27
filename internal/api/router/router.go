@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/fernandoescolar/minioidc/api/handlers"
+	"github.com/fernandoescolar/minioidc/internal/api/handlers"
 	"github.com/fernandoescolar/minioidc/pkg/domain"
 )
 

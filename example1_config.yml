@@ -1,19 +1,20 @@
-server:
-  issuer: http://localhost:8000/
-  audience: http://localhost:8000/
-  private_rsa_key_path: private.pem
-  access_ttl: 20 # minutes
-  refresh_ttl: 129600 # 90 days
-  session_ttl: 129600 # 90 days
-  code_ttl: 5 # minutes
-  sqlite_filepath: db.sqlite3
-  use_sqlite_grant_store: true
-  use_sqlite_session_store: true
+issuer: http://localhost:8000/
+audience: http://localhost:8000/
+private_rsa_key_path: private.pem
+ttl:
+  access: 20 # minutes
+  refresh: 129600 # 90 days
+  session: 129600 # 90 days
+  code: 5 # minutes
+sqlite:
+  filepath: db.sqlite3
+  use_in_grants: true
+  use_in_sessions: true
 clients:
   - id: myclient
     secret_hash: $2a$06$L6/zALdtbkYajjHTZUW29ePBEb/hwhgjhXC4YpHANavvKDJl69ctK # secret
     redirect_uris:
-     - http://localhost:8080/callback
+     - http://localhost:5000/callback
 users:
   - subject: 1
     email: use@mail.com

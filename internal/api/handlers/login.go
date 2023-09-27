@@ -17,6 +17,8 @@ type LoginHandler struct {
 	userStore        domain.UserStore
 }
 
+var _ http.Handler = (*LoginHandler)(nil)
+
 func NewLoginHandler(config *domain.Config, now func() time.Time) *LoginHandler {
 	return &LoginHandler{
 		now:              now,

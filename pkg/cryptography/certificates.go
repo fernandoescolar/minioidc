@@ -2,12 +2,10 @@ package cryptography
 
 import (
 	"crypto"
-	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/pem"
-	"errors"
 	"os"
 
 	"github.com/golang-jwt/jwt"
@@ -24,22 +22,7 @@ type Keypair struct {
 // the package default if nil was passed
 func NewKeypair(key *rsa.PrivateKey) (*Keypair, error) {
 	if key == nil {
-		panic("key cannot be nil")
-	}
-
-	return &Keypair{
-		PrivateKey: key,
-		PublicKey:  &key.PublicKey,
-	}, nil
-}
-
-// RandomKeypair creates a random rsa.PrivateKey and generates a key pair.
-// This can be compute intensive, and should be avoided if called many
-// times in a test suite.
-func RandomKeypair(size int) (*Keypair, error) {
-	key, err := rsa.GenerateKey(rand.Reader, size)
-	if err != nil {
-		return nil, err
+		return nil, nullKeyError()
 	}
 
 	return &Keypair{
@@ -103,6 +86,6 @@ func (k *Keypair) VerifyJWT(token string) (*jwt.Token, error) {
 		if tk, ok := token.Header["kid"]; ok && tk == kid {
 			return k.PublicKey, nil
 		}
-		return nil, errors.New("token kid does not match or is not present")
+		return nil, tokenKidError()
 	})
 }

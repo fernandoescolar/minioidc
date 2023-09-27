@@ -7,15 +7,17 @@ run:
 linters:
   # please, do not use `enable-all`: it's deprecated and will be removed soon.
   # inverted configuration with `enable-all` and `disable` is not scalable during updates of golangci-lint
-  # enable-all: true
   disable-all: true
   enable:
+    - errcheck
+    - staticcheck
+    - errorlint
     - typecheck
     - dupl
     - goprintffuncname
     - govet
     - nolintlint
-    #- rowserrcheck
+    - rowserrcheck
     - gofmt
     - revive
     - goimports
@@ -25,26 +27,27 @@ linters:
     - ineffassign
     - staticcheck
     - exportloopref
-    #- depguard #https://github.com/kedacore/keda/issues/4980
     - dogsled
     - errcheck
-    #- funlen
+    - funlen
     - gci
     - goconst
     - gocritic
     - gocyclo
     - gosimple
+    - gomnd
+    - gofmt
+    - gosec
     - stylecheck
     - unused
     - unparam
     - unconvert
     - whitespace
 linters-settings:
-  # funlen:
-  #   lines: 80
-  #   statements: 40
+  funlen:
+    lines: 84
+    statements: 42
   gci:
     sections:
       - standard
       - default
-      - prefix(github.com/fernandoescolar/minioidc)

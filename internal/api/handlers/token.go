@@ -4,10 +4,11 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"time"
 
-	"github.com/fernandoescolar/minioidc/api/handlers/responses"
+	"github.com/fernandoescolar/minioidc/internal/api/handlers/responses"
 	"github.com/fernandoescolar/minioidc/pkg/cryptography"
 	"github.com/fernandoescolar/minioidc/pkg/domain"
 )
@@ -35,6 +36,8 @@ type tokenResponse struct {
 	TokenType    string        `json:"token_type"`
 	ExpiresIn    time.Duration `json:"expires_in"`
 }
+
+var _ http.Handler = (*TokenHandler)(nil)
 
 func NewTokenHandler(config *domain.Config, now func() time.Time) *TokenHandler {
 	return &TokenHandler{
@@ -188,7 +191,9 @@ func (h *TokenHandler) validateCodeGrant(w http.ResponseWriter, r *http.Request)
 		return nil, false
 	}
 
-	h.grantStore.Grant(grant.ID())
+	if err := h.grantStore.Grant(grant.ID()); err != nil {
+		log.Println("Error granting code:", err)
+	}
 
 	return grant, true
 }

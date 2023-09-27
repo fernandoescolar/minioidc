@@ -94,7 +94,7 @@ func (u *user) Claims(scope []string, claims *IDTokenClaims) (jwt.Claims, error)
 	return &miniClaims{
 		IDTokenClaims:     claims,
 		Email:             user.Email,
-		EmailVerified:     user.EmailVerified,
+		EmailVerified:     true,
 		PreferredUsername: user.PreferredUsername,
 		Phone:             user.Phone,
 		Address:           user.Address,
@@ -119,7 +119,7 @@ func (u *user) scopedClone(scopes []string) *user {
 			clone.Phone = u.Phone
 		case "email":
 			clone.Email = u.Email
-			clone.EmailVerified = u.EmailVerified
+			clone.EmailVerified = true
 		case "groups":
 			clone.Groups = append(make([]string, 0, len(u.Groups)), u.Groups...)
 		}

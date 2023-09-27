@@ -3,6 +3,8 @@ package stores
 import (
 	"database/sql"
 	"errors"
+	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -44,7 +46,7 @@ func (gs *sqlGrantStore) NewCodeGrant(client domain.Client, session domain.Sessi
 	_, err := gs.db.Exec("INSERT INTO grants VALUES(?,?,?,?,?,?,?,?,?);", grant.id, grant.grantType, grant.clientID, grant.sessionID, grant.expiresAt, scopesStr, grant.nonce, grant.codeChallenge, grant.codeChallengeMethod)
 
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("NewCodeGrant: %w", err)
 	}
 
 	return gs.ToGrant(grant)
@@ -64,7 +66,7 @@ func (gs *sqlGrantStore) NewRefreshTokenGrant(client domain.Client, session doma
 
 	_, err := gs.db.Exec("INSERT INTO grants VALUES(?,?,?,?,?,?,?,?,?);", grant.id, grant.grantType, grant.clientID, grant.sessionID, grant.expiresAt, scopesStr, grant.nonce, grant.codeChallenge, grant.codeChallengeMethod)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("NewRefreshTokenGrant: %w", err)
 	}
 
 	return gs.ToGrant(grant)
@@ -76,7 +78,7 @@ func (gs *sqlGrantStore) GetGrantByID(id string) (domain.Grant, error) {
 	row := gs.db.QueryRow("SELECT id, grantType, clientID, sessionID, expiresAt, scopes, nonce, codeChallenge, codeChallengeMethod FROM grants WHERE id = ?;", id)
 	err := row.Scan(&grant.id, &grant.grantType, &grant.clientID, &grant.sessionID, &grant.expiresAt, &grant.scopes, &grant.nonce, &grant.codeChallenge, &grant.codeChallengeMethod)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("GetGrantByID: %w", err)
 	}
 
 	return gs.ToGrant(grant)
@@ -113,18 +115,21 @@ func (gs *sqlGrantStore) Grant(id string) error {
 
 // CleanExpired deletes all expired grants
 func (gs *sqlGrantStore) CleanExpired() {
-	gs.db.Exec("DELETE FROM grants WHERE expiresAt < ?;", time.Now())
+	_, err := gs.db.Exec("DELETE FROM grants WHERE expiresAt < ?;", time.Now())
+	if err != nil {
+		log.Println("WRN Grants CleanExpired: %w", err)
+	}
 }
 
 func (gs *sqlGrantStore) ToGrant(grant *miniGrant) (domain.Grant, error) {
 	session, err := gs.sessionStore.GetSessionByID(grant.sessionID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("ToGrant: %w", err)
 	}
 
 	client, err := gs.clientStore.GetClientByID(grant.clientID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("ToGrant: %w", err)
 	}
 
 	scopes := strings.Split(grant.scopes, " ")

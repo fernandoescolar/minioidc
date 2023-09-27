@@ -2,6 +2,7 @@ package stores
 
 import (
 	"errors"
+	"fmt"
 	"sync"
 
 	"github.com/fernandoescolar/minioidc/pkg/domain"
@@ -11,7 +12,6 @@ import (
 type miniUser struct {
 	subject           string
 	email             string
-	emailVerified     bool
 	preferredUsername string
 	phone             string
 	address           string
@@ -48,7 +48,7 @@ func (us *miniUserStore) NewUser(subject, email, preferredUsername, phone, addre
 
 	us.store[user.subject] = user
 
-	return user.ToUser()
+	return user.User()
 }
 
 // GetUserByID looks up the User
@@ -60,7 +60,7 @@ func (us *miniUserStore) GetUserByID(id string) (domain.User, error) {
 	if !ok {
 		return nil, errors.New("user not found")
 	}
-	return user.ToUser()
+	return user.User()
 }
 
 // GetUserByToken decodes a token and looks up a User based on the
@@ -69,7 +69,7 @@ func (us *miniUserStore) GetUserByToken(token string) (domain.User, error) {
 	claims := &domain.IDTokenClaims{}
 	_, err := jwt.ParseWithClaims(token, claims, nil)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("GetUserByToken: %w", err)
 	}
 
 	return us.GetUserByID(claims.Subject)
@@ -83,7 +83,7 @@ func (us *miniUserStore) GetUserByUsername(username string) (domain.User, error)
 	for _, user := range us.store {
 		user := *user
 		if user.preferredUsername == username {
-			return user.ToUser()
+			return user.User()
 		}
 	}
 
@@ -98,10 +98,10 @@ func (us *miniUserStore) DeleteUser(id string) {
 	delete(us.store, id)
 }
 
-func (u *miniUser) ToUser() (domain.User, error) {
+func (u *miniUser) User() (domain.User, error) {
 	user, err := domain.NewUser(u.subject, u.email, u.preferredUsername, u.phone, u.address, u.groups, u.passwordHash)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("toUser: %w", err)
 	}
 
 	return user, nil

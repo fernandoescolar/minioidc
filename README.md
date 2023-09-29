@@ -187,11 +187,14 @@ The builder has the following fields:
 - `RefreshTTL time.Duration` - Set the refresh token TTL
 - `SessionTTL time.Duration` - Set the session TTL
 - `CodeTTL time.Duration` - Set the authorization code TTL
-- `ClientStore(ClientStore)` - Set the client store
-- `UserStore(UserStore)` - Set the user store
-- `GrantStore(GrantStore)` - Set the grant store
-- `SessionStore(SessionStore)` - Set the session store
-- `LoginTemplate(string)` - Set the login template
+- `ClientStore ClientStore` - Set the client store
+- `UserStore UserStore` - Set the user store
+- `GrantStore GrantStore` - Set the grant store
+- `SessionStore SessionStore` - Set the session store
+- `LoginTemplate string` - Set the login template
+
+And the builder has the following methods:
+
 - `UseSQLite(string, SqliteDatabases)` - Set the SQLite database file path and databases to use (`NoSqliteDatabases`, `OnlyInGrants`, `OnlyInSessions` or `InGrantsAndSessions`)
 
 ## Contributing

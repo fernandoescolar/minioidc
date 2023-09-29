@@ -3,10 +3,14 @@ package middlewares
 import (
 	"log"
 	"net/http"
+
+	"github.com/fernandoescolar/minioidc/pkg/domain"
 )
 
 type Logger struct {
 }
+
+var _ domain.Middleware = (*Logger)(nil)
 
 func NewLogger() *Logger {
 	return &Logger{}

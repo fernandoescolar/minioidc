@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"os"
 
-	// needed for sqlite3
-	_ "github.com/mattn/go-sqlite3"
+	// needed for sqlite
+	_ "modernc.org/sqlite"
 )
 
 const createSqlite string = `
@@ -35,7 +35,7 @@ func NewSqliteDB(filepath string) (*sql.DB, error) {
 		}
 	}
 
-	database, err := sql.Open("sqlite3", filepath)
+	database, err := sql.Open("sqlite", filepath)
 	if err != nil {
 		return nil, fmt.Errorf("NewSqliteDB: %w", err)
 	}

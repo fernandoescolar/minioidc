@@ -19,7 +19,7 @@ minioidc is a lightweight OpenID Connect (OIDC) server designed to provide Singl
 make build-docker && make run-docker
 ```
 
-And then visit [http://localhost:8080](http://localhost:8080).
+And then visit [http://localhost:8000](http://localhost:8000).
 
 - You can also use the visual studio code launch configuration to run the server in debug mode.
 
@@ -42,12 +42,14 @@ There are several commands available in the Makefile:
 
 You have to set the following environment variables:
 
-- `MINIOIDC_ADDR` - The address to listen on (default: `:8080`)
+- `MINIOIDC_ADDR` - The address to listen on (default: `:8000`)
 - `MINIOIDC_CONFIG` - The path to the yaml configuration file
 
 The configuration file is a yaml file with the following structure:
 
 ```yaml
+name: My MiniOIDC
+masterkey: 12345678901234567890123456789012
 issuer: http://example.com
 audience: http://example.com
 private_rsa_key_path: private_key.pem
@@ -66,7 +68,7 @@ clients:
   - id: myclient
     secret_hash: $2a$06$L6/zALdtbkYajjHTZUW29ePBEb/hwhgjhXC4YpHANavvKDJl69ctK # secret
     redirect_uris:
-     - http://localhost:8080/callback
+     - http://myapi.com/callback
 users:
   - subject: 1
     email: use@mail.com
@@ -136,31 +138,32 @@ import (
 )
 
 func main() {
-	builder := api.NewBuilder().
-		WithAudience("https://api.example.com").
-		WithIssuer("https://minioidc.example.com").
-		WithClients([]api.Client{
+	builder := &api.Builder{
+		Audience: "https://api.example.com",
+		Issuer:   "https://minioidc.example.com",
+		Clients: []api.Client{
 			{
 				ID:           "myclient",
 				SecretHash:   "$2a$06$L6/zALdtbkYajjHTZUW29ePBEb/hwhgjhXC4YpHANavvKDJl69ctK", // secret
 				RedirectURIs: []string{"https://api.example.com/callback"},
 			},
-		}).
-		WithUsers([]api.User{
+		},
+		Users: []api.User{
 			{
 				Subject:           "0000001",
 				PreferredUsername: "user",
 				PasswordHash:      "$2a$06$03dduqc0lMbsb5go/l6RI.cRb03Hos9CMpgm5/yYuRsSQPHtrFwSq", // password
 			},
-		})
+		},
+	}
 
 	minioidc, err := builder.Build(config)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	handler := http.NewServeMux()
-	minioidc.Add(handler)
+	mux := http.NewServeMux()
+	handler := minioidc.Wrap(mux)
 
 	log.Printf("Listening http://localhost:8000")
 	err = http.ListenAndServe(":8000", handler)
@@ -170,24 +173,26 @@ func main() {
 }
 ```
 
-The builder has the following methods:
+The builder has the following fields:
 
-- `WithAudience(string)` - Set the OIDC audience
-- `WithIssuer(string)` - Set the OIDC issuer
-- `WithClients([]Client)` - Set the OIDC clients
-- `WithUsers([]User)` - Set the OIDC users
-- `WithPrivateKey(*rsa.PrivateKey)` - Set the OIDC private key
-- `WithPrivateKeyFile(string)` - Set the OIDC private key from a file
-- `WithAccessTTL(int)` - Set the access token TTL in minutes
-- `WithRefreshTTL(int)` - Set the refresh token TTL in minutes
-- `WithSessionTTL(int)` - Set the session TTL in minutes
-- `WithCodeTTL(int)` - Set the authorization code TTL in minutes
-- `WithClientStore(ClientStore)` - Set the client store
-- `WithUserStore(UserStore)` - Set the user store
-- `WithGrantStore(GrantStore)` - Set the grant store
-- `WithSessionStore(SessionStore)` - Set the session store
-- `WithLoginTemplate(string)` - Set the login template
-- `WithSQLite(string, SqliteDatabases)` - Set the SQLite database file path and databases to use (`NoSqliteDatabases`, `OnlyInGrants`, `OnlyInSessions` or `InGrantsAndSessions`)
+- `Name string` - Set the OIDC name (default: `minioidc`)
+- `MasterKey string` - Set the OIDC master key use to encrypt and decrypt internal data (if not set, a new random key will be generated)
+- `Audience string` - Set the OIDC audience (it is MANADATORY)
+- `Issuer string` - Set the OIDC issuer (it is MANADATORY)
+- `Clients []Client` - Set the OIDC clients
+- `Users []User` - Set the OIDC users
+- `PrivateKey *rsa.PrivateKey` - Set the OIDC private key
+- `PrivateKeyFile string` - Set the OIDC private key from a file
+- `AccessTTL time.Duration` - Set the access token TTL
+- `RefreshTTL time.Duration` - Set the refresh token TTL
+- `SessionTTL time.Duration` - Set the session TTL
+- `CodeTTL time.Duration` - Set the authorization code TTL
+- `ClientStore(ClientStore)` - Set the client store
+- `UserStore(UserStore)` - Set the user store
+- `GrantStore(GrantStore)` - Set the grant store
+- `SessionStore(SessionStore)` - Set the session store
+- `LoginTemplate(string)` - Set the login template
+- `UseSQLite(string, SqliteDatabases)` - Set the SQLite database file path and databases to use (`NoSqliteDatabases`, `OnlyInGrants`, `OnlyInSessions` or `InGrantsAndSessions`)
 
 ## Contributing
 

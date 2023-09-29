@@ -9,6 +9,9 @@ import (
 )
 
 type YamlConfig struct {
+	Name      string `yaml:"name"`
+	MasterKey string `yaml:"masterkey"`
+
 	Issuer            string `yaml:"issuer"`
 	Audience          string `yaml:"audience"`
 	PrivateRSAKeyPath string `yaml:"private_rsa_key_path"`
@@ -90,16 +93,21 @@ func NewYamlBuilder(filepath string) (*Builder, error) {
 		}
 	}
 
-	return NewBuilder().
-		WithIssuer(yamlConfig.Issuer).
-		WithAudience(yamlConfig.Audience).
-		WithPrivateKeyFile(yamlConfig.PrivateRSAKeyPath).
-		WithLoginTemplate(yamlConfig.Templates.Login).
-		WithAccessTTL(time.Duration(yamlConfig.TTL.Access)*time.Minute).
-		WithRefreshTTL(time.Duration(yamlConfig.TTL.Refresh)*time.Minute).
-		WithSessionTTL(time.Duration(yamlConfig.TTL.Session)*time.Minute).
-		WithCodeTTL(time.Duration(yamlConfig.TTL.Code)*time.Minute).
-		WithSQLite(yamlConfig.Sqlite.Filepath, sqliteDatabases).
-		WithClients(clients).
-		WithUsers(users), nil
+	builder := &Builder{
+		Name:                  yamlConfig.Name,
+		MasterKey:             yamlConfig.MasterKey,
+		Issuer:                yamlConfig.Issuer,
+		Audience:              yamlConfig.Audience,
+		PrivateRSAKeyFilepath: yamlConfig.PrivateRSAKeyPath,
+		LoginTemplateFilepath: yamlConfig.Templates.Login,
+		AccessTTL:             time.Duration(yamlConfig.TTL.Access) * time.Minute,
+		RefreshTTL:            time.Duration(yamlConfig.TTL.Refresh) * time.Minute,
+		SessionTTL:            time.Duration(yamlConfig.TTL.Session) * time.Minute,
+		CodeTTL:               time.Duration(yamlConfig.TTL.Code) * time.Minute,
+		Clients:               clients,
+		Users:                 users,
+	}
+
+	builder.UseSQLite(yamlConfig.Sqlite.Filepath, sqliteDatabases)
+	return builder, nil
 }

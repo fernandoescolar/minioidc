@@ -1,5 +1,5 @@
 @host = localhost:8000
-@redirect_uri = http://localhost:8080/callback
+@redirect_uri = http://localhost:5000/callback
 @client_id = myclient
 @client_secret = secret
 @scope = openid%20profile%20email%20offline_access
@@ -39,14 +39,14 @@ username=user
 
 @cookies = {{do_login.response.headers.Set-Cookie}}
 
-# @name start_challenge
+# @name re_challenge
 GET {{authorizeLocation}} HTTP/1.1
 Host: {{host}}
 Cookie: {{cookies}}
 Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8
 
 ###
-### get code from redirect query string
+@code = {{re_challenge.request.body.//@getparam/substring-before(substring-after(., "?id="), "&")}}
 ###
 
 # @name token_by_code
@@ -58,7 +58,7 @@ Cookie: {{cookies}}
 
 grant_type=authorization_code
 &redirect_uri={{redirect_uri}}
-&code=d43d7a23960c4a3c9df74ac77c39829dc547fa5550a0467db7f7a6936fa5e884
+&code=72bef1a4855842928383ca6cb1725e8b590291448ded4c99a2dcc37ee51efd13
 &code_verifier={{code_verifier}}
 
 ###

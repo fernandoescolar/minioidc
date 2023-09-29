@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/fernandoescolar/minioidc/internal/api/handlers/responses"
+	"github.com/fernandoescolar/minioidc/internal/api/utils"
 	"github.com/fernandoescolar/minioidc/pkg/cryptography"
 	"github.com/fernandoescolar/minioidc/pkg/domain"
 )
@@ -54,13 +54,13 @@ func NewTokenHandler(config *domain.Config, now func() time.Time) *TokenHandler 
 
 func (h *TokenHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		responses.Error(w, responses.InvalidRequest, "Invalid request method", http.StatusMethodNotAllowed)
+		utils.Error(w, utils.InvalidRequest, "Invalid request method", http.StatusMethodNotAllowed)
 		return
 	}
 
 	err := r.ParseForm()
 	if err != nil {
-		responses.InternalServerError(w, err.Error())
+		utils.InternalServerError(w, err.Error())
 		return
 	}
 
@@ -73,7 +73,7 @@ func (h *TokenHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.requestWithRefresh(w, r)
 		return
 	default:
-		responses.Error(w, responses.InvalidRequest, fmt.Sprintf("Invalid grant type: %s", grantType), http.StatusBadRequest)
+		utils.Error(w, utils.InvalidRequest, fmt.Sprintf("Invalid grant type: %s", grantType), http.StatusBadRequest)
 		return
 	}
 }
@@ -96,14 +96,14 @@ func (h *TokenHandler) requestWithCode(w http.ResponseWriter, r *http.Request) b
 
 	tokens.AccessToken, err = grant.AccessToken(h.issuer, h.audience, h.accessTTL, h.keypair, h.now())
 	if err != nil {
-		responses.InternalServerError(w, err.Error())
+		utils.InternalServerError(w, err.Error())
 		return false
 	}
 
 	if len(grant.Scopes()) > 0 && grant.Scopes()[0] == openidScope {
 		tokens.IDToken, err = grant.IDToken(h.issuer, h.audience, h.refreshTTL, h.keypair, h.now())
 		if err != nil {
-			responses.InternalServerError(w, err.Error())
+			utils.InternalServerError(w, err.Error())
 			return false
 		}
 	}
@@ -111,7 +111,7 @@ func (h *TokenHandler) requestWithCode(w http.ResponseWriter, r *http.Request) b
 	if containsOfflineAccess(grant.Scopes()) {
 		refreshGrant, err := h.grantStore.NewRefreshTokenGrant(grant.Client(), grant.Session(), h.now().Add(h.refreshTTL), grant.Scopes())
 		if err != nil {
-			responses.InternalServerError(w, err.Error())
+			utils.InternalServerError(w, err.Error())
 			return false
 		}
 
@@ -120,12 +120,12 @@ func (h *TokenHandler) requestWithCode(w http.ResponseWriter, r *http.Request) b
 
 	resp, err := json.Marshal(tokens)
 	if err != nil {
-		responses.InternalServerError(w, err.Error())
+		utils.InternalServerError(w, err.Error())
 		return false
 	}
 
-	responses.NoCache(w)
-	responses.JSON(w, resp)
+	utils.NoCache(w)
+	utils.JSON(w, resp)
 
 	return true
 }
@@ -145,26 +145,26 @@ func (h *TokenHandler) requestWithRefresh(w http.ResponseWriter, r *http.Request
 
 	tokens.AccessToken, err = grant.AccessToken(h.issuer, h.audience, h.accessTTL, h.keypair, h.now())
 	if err != nil {
-		responses.InternalServerError(w, err.Error())
+		utils.InternalServerError(w, err.Error())
 		return false
 	}
 
 	if len(grant.Scopes()) > 0 && grant.Scopes()[0] == openidScope {
 		tokens.IDToken, err = grant.IDToken(h.issuer, h.audience, h.refreshTTL, h.keypair, h.now())
 		if err != nil {
-			responses.InternalServerError(w, err.Error())
+			utils.InternalServerError(w, err.Error())
 			return false
 		}
 	}
 
 	resp, err := json.Marshal(tokens)
 	if err != nil {
-		responses.InternalServerError(w, err.Error())
+		utils.InternalServerError(w, err.Error())
 		return false
 	}
 
-	responses.NoCache(w)
-	responses.JSON(w, resp)
+	utils.NoCache(w)
+	utils.JSON(w, resp)
 
 	return true
 }
@@ -173,7 +173,7 @@ func (h *TokenHandler) validateCodeGrant(w http.ResponseWriter, r *http.Request)
 	if !assertPresenceInForm([]string{"code", "redirect_uri"}, w, r) {
 		return nil, false
 	}
-	equal := assertEqualInForm("grant_type", "authorization_code", responses.UnsupportedGrantType, "Invalid grant type", w, r)
+	equal := assertEqualInForm("grant_type", "authorization_code", utils.UnsupportedGrantType, "Invalid grant type", w, r)
 	if !equal {
 		return nil, false
 	}
@@ -181,13 +181,13 @@ func (h *TokenHandler) validateCodeGrant(w http.ResponseWriter, r *http.Request)
 	code := r.Form.Get("code")
 	grant, err := h.grantStore.GetGrantByIDAndType(code, domain.GrantTypeCode)
 	if err != nil || grant.HasBeenGranted() {
-		responses.Error(w, responses.InvalidGrant, fmt.Sprintf("Invalid code: %s", code), http.StatusUnauthorized)
+		utils.Error(w, utils.InvalidGrant, fmt.Sprintf("Invalid code: %s", code), http.StatusUnauthorized)
 		return nil, false
 	}
 
 	redirectURI := r.Form.Get("redirect_uri")
 	if !grant.Client().RedirectURLIsValid(redirectURI) {
-		responses.Error(w, responses.InvalidRequest, "Invalid redirect uri", http.StatusBadRequest)
+		utils.Error(w, utils.InvalidRequest, "Invalid redirect uri", http.StatusBadRequest)
 		return nil, false
 	}
 
@@ -205,18 +205,18 @@ func (h *TokenHandler) validateCodeChallenge(w http.ResponseWriter, r *http.Requ
 
 	codeVerifier := r.Form.Get("code_verifier")
 	if codeVerifier == "" {
-		responses.Error(w, responses.InvalidGrant, "Invalid code verifier. Expected code but client sent none.", http.StatusUnauthorized)
+		utils.Error(w, utils.InvalidGrant, "Invalid code verifier. Expected code but client sent none.", http.StatusUnauthorized)
 		return false
 	}
 
 	challenge, err := cryptography.GenerateCodeChallenge(grant.CodeChallengeMethod(), codeVerifier)
 	if err != nil {
-		responses.Error(w, responses.InvalidRequest, fmt.Sprintf("Invalid code verifier. %v", err.Error()), http.StatusUnauthorized)
+		utils.Error(w, utils.InvalidRequest, fmt.Sprintf("Invalid code verifier. %v", err.Error()), http.StatusUnauthorized)
 		return false
 	}
 
 	if challenge != grant.CodeChallenge() {
-		responses.Error(w, responses.InvalidGrant, "Invalid code verifier. Code challenge did not match hashed code verifier.", http.StatusUnauthorized)
+		utils.Error(w, utils.InvalidGrant, "Invalid code verifier. Code challenge did not match hashed code verifier.", http.StatusUnauthorized)
 		return false
 	}
 
@@ -228,7 +228,7 @@ func (h *TokenHandler) validateRefreshGrant(w http.ResponseWriter, r *http.Reque
 		return nil, false
 	}
 
-	equal := assertEqualInForm("grant_type", "refresh_token", responses.UnsupportedGrantType, "Invalid grant type", w, r)
+	equal := assertEqualInForm("grant_type", "refresh_token", utils.UnsupportedGrantType, "Invalid grant type", w, r)
 	if !equal {
 		return nil, false
 	}
@@ -239,7 +239,7 @@ func (h *TokenHandler) validateRefreshGrant(w http.ResponseWriter, r *http.Reque
 
 	_, err := h.clientStore.GetClientByID(r.Form.Get("client_id"))
 	if err != nil {
-		responses.Error(w, responses.InvalidClient, "Invalid client id", http.StatusUnauthorized)
+		utils.Error(w, utils.InvalidClient, "Invalid client id", http.StatusUnauthorized)
 		return nil, false
 	}
 
@@ -252,7 +252,7 @@ func (h *TokenHandler) validateRefreshGrant(w http.ResponseWriter, r *http.Reque
 	refreshToken := r.Form.Get("refresh_token")
 	grant, err := h.grantStore.GetGrantByIDAndType(refreshToken, domain.GrantTypeRefresh)
 	if err != nil {
-		responses.Error(w, responses.InvalidGrant, "Invalid refresh token",
+		utils.Error(w, utils.InvalidGrant, "Invalid refresh token",
 			http.StatusUnauthorized)
 		return nil, false
 	}
@@ -265,9 +265,9 @@ func assertPresenceInForm(params []string, rw http.ResponseWriter, req *http.Req
 		if req.Form.Get(param) != "" {
 			continue
 		}
-		responses.Error(
+		utils.Error(
 			rw,
-			responses.InvalidRequest,
+			utils.InvalidRequest,
 			fmt.Sprintf("The request is missing the required parameter: %s", param),
 			http.StatusBadRequest,
 		)
@@ -279,7 +279,7 @@ func assertPresenceInForm(params []string, rw http.ResponseWriter, req *http.Req
 func assertEqualInForm(param, value, errorType, errorMsg string, w http.ResponseWriter, r *http.Request) bool {
 	formValue := r.Form.Get(param)
 	if subtle.ConstantTimeCompare([]byte(value), []byte(formValue)) == 0 {
-		responses.Error(w, errorType, fmt.Sprintf("%s: %s", errorMsg, formValue),
+		utils.Error(w, errorType, fmt.Sprintf("%s: %s", errorMsg, formValue),
 			http.StatusUnauthorized)
 		return false
 	}

@@ -1,5 +1,4 @@
 FROM golang:1.21-alpine AS build
-ENV CGO_ENABLED=1
 ENV GOOS=linux
 RUN apk add --no-cache \
     gcc \

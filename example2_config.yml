@@ -4,7 +4,7 @@ clients:
   - id: myclient
     secret_hash: $2a$06$L6/zALdtbkYajjHTZUW29ePBEb/hwhgjhXC4YpHANavvKDJl69ctK # secret
     redirect_uris:
-     - http://localhost:8080/callback
+     - http://localhost:5000/callback
 users:
   - subject: 1
     email: use@mail.com

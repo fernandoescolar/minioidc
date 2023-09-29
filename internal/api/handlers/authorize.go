@@ -8,7 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/fernandoescolar/minioidc/internal/api/handlers/responses"
+	"github.com/fernandoescolar/minioidc/internal/api/utils"
+	"github.com/fernandoescolar/minioidc/pkg/cryptography"
 	"github.com/fernandoescolar/minioidc/pkg/domain"
 )
 
@@ -19,6 +20,7 @@ type AuthorizeHandler struct {
 	clientStore   domain.ClientStore
 	grantStore    domain.GrantStore
 	sessionStore  domain.SessionStore
+	masterKey     string
 }
 
 var _ http.Handler = (*AuthorizeHandler)(nil)
@@ -31,12 +33,13 @@ func NewAuthorizeHandler(config *domain.Config, now func() time.Time, loginEndpo
 		clientStore:   config.ClientStore,
 		grantStore:    config.GrantStore,
 		sessionStore:  config.SessionStore,
+		masterKey:     config.MasterKey,
 	}
 }
 
 func (h *AuthorizeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		responses.Error(w, responses.InvalidRequest, "Invalid request method", http.StatusMethodNotAllowed)
+		utils.Error(w, utils.InvalidRequest, "Invalid request method", http.StatusMethodNotAllowed)
 		return
 	}
 
@@ -51,18 +54,18 @@ func (h *AuthorizeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	client, err := h.clientStore.GetClientByID(r.URL.Query().Get("client_id"))
 	if err != nil {
-		responses.Error(w, responses.InvalidClient, "Invalid client id", http.StatusUnauthorized)
+		utils.Error(w, utils.InvalidClient, "Invalid client id", http.StatusUnauthorized)
 		return
 	}
 
 	validRedirectURI := client.RedirectURLIsValid(r.URL.Query().Get("redirect_uri"))
 	if !validRedirectURI {
-		responses.Error(w, responses.InvalidRequest, "Invalid redirect uri", http.StatusBadRequest)
+		utils.Error(w, utils.InvalidRequest, "Invalid redirect uri", http.StatusBadRequest)
 		return
 	}
 
 	validType := assertEqualInQuery("response_type", "code",
-		responses.UnsupportedGrantType, "Invalid response type", w, r)
+		utils.UnsupportedGrantType, "Invalid response type", w, r)
 	if !validType {
 		return
 	}
@@ -70,13 +73,10 @@ func (h *AuthorizeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	session := h.getAuthenticatedUserFromCookies(r)
+	session := utils.GetSession(r)
 	if session == nil {
-		returnURL := r.URL.String()
-		returnURL = url.QueryEscape(returnURL)
-		location := fmt.Sprintf("%s?return_url=%s", h.loginEndpoint, returnURL)
-		w.Header().Set("Location", location)
-		w.WriteHeader(http.StatusFound)
+		// the session should be handled in the SessionAuthorized middleware
+		utils.InternalServerError(w, "Session not found")
 		return
 	}
 
@@ -90,20 +90,19 @@ func (h *AuthorizeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		r.URL.Query().Get("code_challenge_method"),
 	)
 	if err != nil {
-		responses.InternalServerError(w, err.Error())
+		utils.InternalServerError(w, err.Error())
 		return
 	}
 
 	redirectURI, err := url.Parse(r.URL.Query().Get("redirect_uri"))
 	if err != nil {
-		responses.InternalServerError(w, err.Error())
+		utils.InternalServerError(w, err.Error())
 		return
 	}
 	params, _ := url.ParseQuery(redirectURI.RawQuery)
 	params.Set("code", grant.ID())
 	params.Set("state", r.URL.Query().Get("state"))
 	redirectURI.RawQuery = params.Encode()
-
 	http.Redirect(w, r, redirectURI.String(), http.StatusFound)
 }
 
@@ -113,8 +112,13 @@ func (h *AuthorizeHandler) getAuthenticatedUserFromCookies(r *http.Request) doma
 		return nil
 	}
 
-	sessionID := cookie.Value
-	if sessionID == "" {
+	encryptedSessionID := cookie.Value
+	if encryptedSessionID == "" {
+		return nil
+	}
+
+	sessionID, err := cryptography.Decrypts(encryptedSessionID, h.masterKey)
+	if sessionID == "" || err != nil {
 		return nil
 	}
 
@@ -135,7 +139,7 @@ func validateScope(w http.ResponseWriter, r *http.Request) bool {
 	scopes := strings.Split(r.URL.Query().Get("scope"), " ")
 	for _, scope := range scopes {
 		if _, ok := allowed[scope]; !ok {
-			responses.Error(w, responses.InvalidScope, fmt.Sprintf("Unsupported scope: %s", scope),
+			utils.Error(w, utils.InvalidScope, fmt.Sprintf("Unsupported scope: %s", scope),
 				http.StatusBadRequest)
 			return false
 		}
@@ -145,7 +149,7 @@ func validateScope(w http.ResponseWriter, r *http.Request) bool {
 
 func validateCodeChallengeMethodSupported(w http.ResponseWriter, method string, supportedMethods []string) bool {
 	if method != "" && !contains(method, supportedMethods) {
-		responses.Error(w, responses.InvalidRequest, "Invalid code challenge method", http.StatusBadRequest)
+		utils.Error(w, utils.InvalidRequest, "Invalid code challenge method", http.StatusBadRequest)
 		return false
 	}
 	return true
@@ -156,9 +160,9 @@ func assertPresenceInQuery(params []string, w http.ResponseWriter, r *http.Reque
 		if r.URL.Query().Get(param) != "" {
 			continue
 		}
-		responses.Error(
+		utils.Error(
 			w,
-			responses.InvalidRequest,
+			utils.InvalidRequest,
 			fmt.Sprintf("The request is missing the required parameter: %s", param),
 			http.StatusBadRequest,
 		)
@@ -170,7 +174,7 @@ func assertPresenceInQuery(params []string, w http.ResponseWriter, r *http.Reque
 func assertEqualInQuery(param, value, errorType, errorMsg string, w http.ResponseWriter, r *http.Request) bool {
 	queryValue := r.URL.Query().Get(param)
 	if subtle.ConstantTimeCompare([]byte(value), []byte(queryValue)) == 0 {
-		responses.Error(w, errorType, fmt.Sprintf("%s: %s", errorMsg, queryValue),
+		utils.Error(w, errorType, fmt.Sprintf("%s: %s", errorMsg, queryValue),
 			http.StatusUnauthorized)
 		return false
 	}

@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/fernandoescolar/minioidc/internal/api/handlers/responses"
+	"github.com/fernandoescolar/minioidc/internal/api/utils"
 	"github.com/fernandoescolar/minioidc/pkg/cryptography"
 )
 
@@ -109,11 +109,11 @@ func (h *DiscoveryHandler) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 
 	resp, err := json.Marshal(discovery)
 	if err != nil {
-		responses.InternalServerError(w, err.Error())
+		utils.InternalServerError(w, err.Error())
 		return
 	}
 
-	responses.JSON(w, resp)
+	utils.JSON(w, resp)
 }
 
 func (h *DiscoveryHandler) Issuer() string {

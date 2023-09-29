@@ -20,15 +20,12 @@ type miniUser struct {
 }
 
 type miniUserStore struct {
-	sync.RWMutex
-	store map[string]*miniUser
+	sync.Map
 }
 
 // NewUserStore initializes the UserStore for this server
 func NewUserStore() domain.UserStore {
-	return &miniUserStore{
-		store: make(map[string]*miniUser),
-	}
+	return &miniUserStore{}
 }
 
 // NewUser creates a new User
@@ -43,23 +40,18 @@ func (us *miniUserStore) NewUser(subject, email, preferredUsername, phone, addre
 		passwordHash:      passwordHash,
 	}
 
-	us.Lock()
-	defer us.Unlock()
-
-	us.store[user.subject] = user
-
+	us.Store(user.subject, user)
 	return user.User()
 }
 
 // GetUserByID looks up the User
 func (us *miniUserStore) GetUserByID(id string) (domain.User, error) {
-	us.RLock()
-	defer us.RUnlock()
-
-	user, ok := us.store[id]
+	v, ok := us.Load(id)
 	if !ok {
 		return nil, errors.New("user not found")
 	}
+
+	user := v.(*miniUser)
 	return user.User()
 }
 
@@ -77,14 +69,19 @@ func (us *miniUserStore) GetUserByToken(token string) (domain.User, error) {
 
 // GetUserByUsername looks up a User by their username
 func (us *miniUserStore) GetUserByUsername(username string) (domain.User, error) {
-	us.RLock()
-	defer us.RUnlock()
-
-	for _, user := range us.store {
-		user := *user
-		if user.preferredUsername == username {
-			return user.User()
+	var user *miniUser
+	us.Range(func(k, v interface{}) bool {
+		u := v.(*miniUser)
+		if u.preferredUsername == username {
+			user = u
+			return false
 		}
+
+		return true
+	})
+
+	if user != nil {
+		return user.User()
 	}
 
 	return nil, errors.New("user not found")
@@ -92,10 +89,7 @@ func (us *miniUserStore) GetUserByUsername(username string) (domain.User, error)
 
 // DeleteUser deletes a User from the cache
 func (us *miniUserStore) DeleteUser(id string) {
-	us.Lock()
-	defer us.Unlock()
-
-	delete(us.store, id)
+	us.Delete(id)
 }
 
 func (u *miniUser) User() (domain.User, error) {

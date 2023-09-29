@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/fernandoescolar/minioidc/internal/api/handlers/responses"
+	"github.com/fernandoescolar/minioidc/internal/api/utils"
 	"github.com/fernandoescolar/minioidc/pkg/cryptography"
 	"github.com/fernandoescolar/minioidc/pkg/domain"
 	"github.com/golang-jwt/jwt"
@@ -38,24 +38,24 @@ func (h *UserinfoHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	grant, err := h.grantStore.GetGrantByToken(token)
 	if err != nil {
-		responses.InternalServerError(w, err.Error())
+		utils.InternalServerError(w, err.Error())
 		return
 	}
 
 	resp, err := grant.User().Userinfo(grant.Scopes())
 	if err != nil {
-		responses.InternalServerError(w, err.Error())
+		utils.InternalServerError(w, err.Error())
 		return
 	}
 
-	responses.JSON(w, resp)
+	utils.JSON(w, resp)
 }
 
 func (h *UserinfoHandler) authorizeBearer(w http.ResponseWriter, r *http.Request) (*jwt.Token, bool) {
 	header := r.Header.Get("Authorization")
 	parts := strings.SplitN(header, " ", AuthorizationParts)
 	if len(parts) < AuthorizationParts || parts[0] != "Bearer" {
-		responses.Error(w, responses.InvalidRequest, "Invalid authorization header", http.StatusUnauthorized)
+		utils.Error(w, utils.InvalidRequest, "Invalid authorization header", http.StatusUnauthorized)
 		return nil, false
 	}
 
@@ -65,24 +65,24 @@ func (h *UserinfoHandler) authorizeBearer(w http.ResponseWriter, r *http.Request
 func (h *UserinfoHandler) authorizeToken(t string, w http.ResponseWriter) (*jwt.Token, bool) {
 	token, err := h.keypair.VerifyJWT(t)
 	if err != nil {
-		responses.Error(w, responses.InvalidRequest, fmt.Sprintf("Invalid token: %v", err), http.StatusUnauthorized)
+		utils.Error(w, utils.InvalidRequest, fmt.Sprintf("Invalid token: %v", err), http.StatusUnauthorized)
 		return nil, false
 	}
 
 	claims, ok := token.Claims.(jwt.MapClaims)
 	if !ok {
-		responses.InternalServerError(w, "Unable to extract token claims")
+		utils.InternalServerError(w, "Unable to extract token claims")
 		return nil, false
 	}
 
 	exp, ok := claims["exp"].(float64)
 	if !ok {
-		responses.InternalServerError(w, "Unable to extract token expiration")
+		utils.InternalServerError(w, "Unable to extract token expiration")
 		return nil, false
 	}
 
 	if h.now().Unix() > int64(exp) {
-		responses.Error(w, responses.InvalidRequest, "The token is expired", http.StatusUnauthorized)
+		utils.Error(w, utils.InvalidRequest, "The token is expired", http.StatusUnauthorized)
 		return nil, false
 	}
 

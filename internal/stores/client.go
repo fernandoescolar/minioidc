@@ -14,15 +14,12 @@ type miniClient struct {
 }
 
 type miniClientStore struct {
-	sync.RWMutex
-	Store map[string]*miniClient
+	sync.Map
 }
 
 // NewClientStore initializes the ClientStore for this server
 func NewClientStore() domain.ClientStore {
-	return &miniClientStore{
-		Store: make(map[string]*miniClient),
-	}
+	return &miniClientStore{}
 }
 
 // NewClient creates a new Client
@@ -33,23 +30,18 @@ func (cs *miniClientStore) NewClient(id string, secretHash string, redirectUris 
 		redirectUrls: redirectUris,
 	}
 
-	cs.Lock()
-	defer cs.Unlock()
-	cs.Store[client.id] = client
-
+	cs.Store(client.id, client)
 	return client.toClient()
 }
 
 // GetClientByID looks up the Client
 func (cs *miniClientStore) GetClientByID(id string) (domain.Client, error) {
-	cs.RLock()
-	defer cs.RUnlock()
-
-	client, ok := cs.Store[id]
+	v, ok := cs.Load(id)
 	if !ok {
 		return nil, errors.New("client not found")
 	}
 
+	client := v.(*miniClient)
 	return client.toClient()
 }
 

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/fernandoescolar/minioidc/pkg/cryptography"
 	"github.com/fernandoescolar/minioidc/pkg/domain"
 	"github.com/google/uuid"
 )
@@ -15,6 +16,7 @@ type LoginHandler struct {
 	sessionTTL       time.Duration
 	sessionStore     domain.SessionStore
 	userStore        domain.UserStore
+	masterKey        string
 }
 
 var _ http.Handler = (*LoginHandler)(nil)
@@ -26,6 +28,7 @@ func NewLoginHandler(config *domain.Config, now func() time.Time) *LoginHandler 
 		sessionTTL:       config.SessionTTL,
 		sessionStore:     config.SessionStore,
 		userStore:        config.UserStore,
+		masterKey:        config.MasterKey,
 	}
 }
 
@@ -82,9 +85,15 @@ func (h *LoginHandler) postHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// encrypt session ID
+	encryptedSessionID, err := cryptography.Encrypts(h.masterKey, session.ID())
+	if err != nil {
+		h.renderLoginPage(w, username, false, true)
+		return
+	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     "session",
-		Value:    session.ID(),
+		Value:    encryptedSessionID,
 		Expires:  expiresAt,
 		HttpOnly: true,
 	})

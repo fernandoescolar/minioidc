@@ -24,29 +24,31 @@ const (
 )
 
 type Builder struct {
-	issuer                string
-	audience              string
-	privateRSAKeyFilepath string
-	privateRSAKey         *rsa.PrivateKey
+	Name                  string
+	MasterKey             string
+	Issuer                string
+	Audience              string
+	PrivateRSAKeyFilepath string
+	PrivateRSAKey         *rsa.PrivateKey
 
-	accessTTL  time.Duration
-	refreshTTL time.Duration
-	sessionTTL time.Duration
-	codeTTL    time.Duration
+	AccessTTL  time.Duration
+	RefreshTTL time.Duration
+	SessionTTL time.Duration
+	CodeTTL    time.Duration
 
-	loginTemplateFilepath string
+	LoginTemplateFilepath string
 
-	clientStore  domain.ClientStore
-	grantStore   domain.GrantStore
-	sessionStore domain.SessionStore
-	userStore    domain.UserStore
+	ClientStore  domain.ClientStore
+	GrantStore   domain.GrantStore
+	SessionStore domain.SessionStore
+	UserStore    domain.UserStore
 
 	sqliteFilepath      string
 	sqliteUseInGrants   bool
 	sqliteUseInSessions bool
 
-	clients []Client
-	users   []User
+	Clients []Client
+	Users   []User
 }
 
 type Client struct {
@@ -65,76 +67,8 @@ type User struct {
 	Groups            []string
 }
 
-func NewBuilder() *Builder {
-	return &Builder{}
-}
-
-func (b *Builder) WithIssuer(i string) *Builder {
-	b.issuer = i
-	return b
-}
-
-func (b *Builder) WithAudience(a string) *Builder {
-	b.audience = a
-	return b
-}
-
-func (b *Builder) WithPrivateKey(k *rsa.PrivateKey) *Builder {
-	b.privateRSAKey = k
-	return b
-}
-
-func (b *Builder) WithPrivateKeyFile(f string) *Builder {
-	b.privateRSAKeyFilepath = f
-	return b
-}
-
-func (b *Builder) WithAccessTTL(t time.Duration) *Builder {
-	b.accessTTL = t
-	return b
-}
-
-func (b *Builder) WithRefreshTTL(t time.Duration) *Builder {
-	b.refreshTTL = t
-	return b
-}
-
-func (b *Builder) WithSessionTTL(t time.Duration) *Builder {
-	b.sessionTTL = t
-	return b
-}
-
-func (b *Builder) WithCodeTTL(t time.Duration) *Builder {
-	b.codeTTL = t
-	return b
-}
-
-func (b *Builder) WithClientStore(c domain.ClientStore) *Builder {
-	b.clientStore = c
-	return b
-}
-
-func (b *Builder) WithGrantStore(g domain.GrantStore) *Builder {
-	b.grantStore = g
-	return b
-}
-
-func (b *Builder) WithSessionStore(s domain.SessionStore) *Builder {
-	b.sessionStore = s
-	return b
-}
-
-func (b *Builder) WithUserStore(u domain.UserStore) *Builder {
-	b.userStore = u
-	return b
-}
-
-func (b *Builder) WithLoginTemplate(l string) *Builder {
-	b.loginTemplateFilepath = l
-	return b
-}
-
-func (b *Builder) WithSQLite(f string, d SqliteDatabases) *Builder {
+// UseSQLite sets the sqlite filepath and the databases where it will be used
+func (b *Builder) UseSQLite(f string, d SqliteDatabases) {
 	b.sqliteFilepath = f
 
 	switch d {
@@ -151,20 +85,9 @@ func (b *Builder) WithSQLite(f string, d SqliteDatabases) *Builder {
 		b.sqliteUseInGrants = false
 		b.sqliteUseInSessions = false
 	}
-
-	return b
 }
 
-func (b *Builder) WithClients(c []Client) *Builder {
-	b.clients = c
-	return b
-}
-
-func (b *Builder) WithUsers(u []User) *Builder {
-	b.users = u
-	return b
-}
-
+// builds the server
 func (b *Builder) Build() (*Minioidc, error) {
 	if err := b.validate(); err != nil {
 		return nil, err
@@ -179,26 +102,26 @@ func (b *Builder) Build() (*Minioidc, error) {
 		return nil, err
 	}
 
-	return NewMinioidc(config)
+	return NewMinioidc(config), nil
 }
 
 func (b *Builder) validate() error {
-	if b.issuer == "" {
+	if b.Issuer == "" {
 		return errors.New("issuer is required")
 	}
-	if b.audience == "" {
+	if b.Audience == "" {
 		return errors.New("audience is required")
 	}
-	if b.privateRSAKeyFilepath != "" && b.privateRSAKey != nil {
+	if b.PrivateRSAKeyFilepath != "" && b.PrivateRSAKey != nil {
 		return errors.New("private key and private key filepath are mutually exclusive")
 	}
 	if b.sqliteFilepath == "" && (b.sqliteUseInGrants || b.sqliteUseInSessions) {
 		return errors.New("sqlite filepath is required")
 	}
-	if b.sqliteUseInGrants && b.grantStore != nil {
+	if b.sqliteUseInGrants && b.GrantStore != nil {
 		return errors.New("sqlite grant store and grant store are mutually exclusive")
 	}
-	if b.sqliteUseInSessions && b.sessionStore != nil {
+	if b.sqliteUseInSessions && b.SessionStore != nil {
 		return errors.New("sqlite session store and session store are mutually exclusive")
 	}
 
@@ -214,28 +137,39 @@ const (
 )
 
 func (b *Builder) assignDefaults() error {
-	if b.privateRSAKeyFilepath == "" && b.privateRSAKey == nil {
+	if b.Name == "" {
+		b.Name = "minioidc"
+	}
+	if b.MasterKey == "" {
+		masterKey, err := cryptography.RandomPassword(16)
+		if err != nil {
+			return fmt.Errorf("cannot create random masterkey: %w", err)
+		}
+
+		b.MasterKey = masterKey
+	}
+	if b.PrivateRSAKeyFilepath == "" && b.PrivateRSAKey == nil {
 		rk, err := rsa.GenerateKey(rand.Reader, defaultRSASize)
 		if err != nil {
 			return fmt.Errorf("random keypair: %w", err)
 		}
 
-		b.privateRSAKey = rk
+		b.PrivateRSAKey = rk
 	}
-	if b.accessTTL == 0 {
-		b.accessTTL = defaultAccessTTL * time.Minute
+	if b.AccessTTL == 0 {
+		b.AccessTTL = defaultAccessTTL * time.Minute
 	}
-	if b.refreshTTL == 0 {
-		b.refreshTTL = defaultRefreshTTL * time.Minute
+	if b.RefreshTTL == 0 {
+		b.RefreshTTL = defaultRefreshTTL * time.Minute
 	}
-	if b.sessionTTL == 0 {
-		b.sessionTTL = defaultSessionTTL * time.Minute
+	if b.SessionTTL == 0 {
+		b.SessionTTL = defaultSessionTTL * time.Minute
 	}
-	if b.codeTTL == 0 {
-		b.codeTTL = defaultCodeTTL * time.Minute
+	if b.CodeTTL == 0 {
+		b.CodeTTL = defaultCodeTTL * time.Minute
 	}
-	if b.loginTemplateFilepath == "" {
-		b.loginTemplateFilepath = "templates/login1.html"
+	if b.LoginTemplateFilepath == "" {
+		b.LoginTemplateFilepath = "templates/login1.html"
 	}
 
 	return nil
@@ -243,15 +177,17 @@ func (b *Builder) assignDefaults() error {
 
 func (b *Builder) config() (*domain.Config, error) {
 	config := &domain.Config{
-		Issuer:   b.issuer,
-		Audience: b.audience,
+		Name:      b.Name,
+		MasterKey: b.MasterKey,
+		Issuer:    b.Issuer,
+		Audience:  b.Audience,
 
-		AccessTTL:  b.accessTTL,
-		RefreshTTL: b.refreshTTL,
-		SessionTTL: b.sessionTTL,
-		CodeTTL:    b.codeTTL,
+		AccessTTL:  b.AccessTTL,
+		RefreshTTL: b.RefreshTTL,
+		SessionTTL: b.SessionTTL,
+		CodeTTL:    b.CodeTTL,
 
-		LoginTemplateFilepath: b.loginTemplateFilepath,
+		LoginTemplateFilepath: b.LoginTemplateFilepath,
 	}
 
 	if err := b.assignPrivateKey(config); err != nil {
@@ -270,8 +206,8 @@ func (b *Builder) config() (*domain.Config, error) {
 }
 
 func (b *Builder) assignPrivateKey(config *domain.Config) error {
-	if b.privateRSAKey != nil {
-		keypair, err := cryptography.NewKeypair(b.privateRSAKey)
+	if b.PrivateRSAKey != nil {
+		keypair, err := cryptography.NewKeypair(b.PrivateRSAKey)
 		if err != nil {
 			return fmt.Errorf("keypair: %w", err)
 		}
@@ -279,8 +215,8 @@ func (b *Builder) assignPrivateKey(config *domain.Config) error {
 		config.Keypair = keypair
 	}
 
-	if b.privateRSAKeyFilepath != "" {
-		rsaKey, err := cryptography.LoadPrivateKey(b.privateRSAKeyFilepath)
+	if b.PrivateRSAKeyFilepath != "" {
+		rsaKey, err := cryptography.LoadPrivateKey(b.PrivateRSAKeyFilepath)
 		if err != nil {
 			return fmt.Errorf("load private key: %w", err)
 		}
@@ -313,34 +249,34 @@ func (b *Builder) assignStores(config *domain.Config) error {
 		}
 	}
 
-	if b.userStore == nil {
+	if b.UserStore == nil {
 		userStore = stores.NewUserStore()
 	} else {
-		userStore = b.userStore
+		userStore = b.UserStore
 	}
 
-	if b.clientStore == nil {
+	if b.ClientStore == nil {
 		clientStore = stores.NewClientStore()
 	} else {
-		clientStore = b.clientStore
+		clientStore = b.ClientStore
 	}
 
 	switch {
 	case b.sqliteUseInSessions:
 		sessionStore = stores.NewSqliteSessionStore(sqlite, userStore)
-	case b.sessionStore == nil:
+	case b.SessionStore == nil:
 		sessionStore = stores.NewSessionStore(userStore)
 	default:
-		sessionStore = b.sessionStore
+		sessionStore = b.SessionStore
 	}
 
 	switch {
 	case b.sqliteUseInGrants:
 		grantStore = stores.NewSqliteGrantStore(sqlite, clientStore, sessionStore)
-	case b.grantStore == nil:
+	case b.GrantStore == nil:
 		grantStore = stores.NewGrantStore(clientStore, sessionStore)
 	default:
-		grantStore = b.grantStore
+		grantStore = b.GrantStore
 	}
 
 	config.ClientStore = clientStore
@@ -368,7 +304,7 @@ func (b *Builder) seedData(config *domain.Config) error {
 }
 
 func (b *Builder) seedClients(clientStore domain.ClientStore) error {
-	for _, c := range b.clients {
+	for _, c := range b.Clients {
 		_, err := clientStore.NewClient(c.ID, c.SecretHash, c.RedirectURIs)
 		if err != nil {
 			return fmt.Errorf("seed clients: %w", err)
@@ -379,7 +315,7 @@ func (b *Builder) seedClients(clientStore domain.ClientStore) error {
 }
 
 func (b *Builder) seedUsers(userStore domain.UserStore) error {
-	for _, u := range b.users {
+	for _, u := range b.Users {
 		_, err := userStore.NewUser(u.Subject, u.Email, u.PreferredUsername, u.Phone, u.Address, u.Groups, u.PasswordHash)
 		if err != nil {
 			return fmt.Errorf("seed users: %w", err)

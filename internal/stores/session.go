@@ -11,8 +11,7 @@ import (
 
 // SessionStore manages our Session objects
 type miniSessionStore struct {
-	sync.RWMutex
-	store     map[string]*miniSession
+	sync.Map
 	userStore domain.UserStore
 }
 
@@ -25,7 +24,6 @@ type miniSession struct {
 // NewSessionStore initializes the SessionStore for this server
 func NewSessionStore(userStore domain.UserStore) domain.SessionStore {
 	return &miniSessionStore{
-		store:     make(map[string]*miniSession),
 		userStore: userStore,
 	}
 }
@@ -38,45 +36,39 @@ func (ss *miniSessionStore) NewSession(sessionID string, user domain.User, expir
 		expiresAt: expiresAt,
 	}
 
-	ss.Lock()
-	defer ss.Unlock()
-	ss.store[sessionID] = session
-
+	ss.Store(sessionID, session)
 	return ss.Session(session)
 }
 
 // GetSessionByID looks up the Session
 func (ss *miniSessionStore) GetSessionByID(id string) (domain.Session, error) {
-	ss.RLock()
-	defer ss.RUnlock()
-
-	session, ok := ss.store[id]
+	v, ok := ss.Load(id)
 	if !ok {
 		return nil, errors.New("session not found")
 	}
+
+	session := v.(*miniSession)
 	return ss.Session(session)
 }
 
 func (ss *miniSessionStore) DeleteUserSessions(userID string) {
-	ss.Lock()
-	defer ss.Unlock()
-
-	for id, session := range ss.store {
+	ss.Range(func(k, v interface{}) bool {
+		session := v.(*miniSession)
 		if session.userID == userID {
-			delete(ss.store, id)
+			ss.Delete(k)
 		}
-	}
+		return true
+	})
 }
 
 func (ss *miniSessionStore) CleanExpired() {
-	ss.Lock()
-	defer ss.Unlock()
-
-	for id, session := range ss.store {
+	ss.Range(func(k, v interface{}) bool {
+		session := v.(*miniSession)
 		if session.expiresAt.Before(time.Now()) {
-			delete(ss.store, id)
+			ss.Delete(k)
 		}
-	}
+		return true
+	})
 }
 
 func (ss *miniSessionStore) Session(session *miniSession) (domain.Session, error) {

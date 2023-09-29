@@ -3,7 +3,7 @@ package handlers
 import (
 	"net/http"
 
-	"github.com/fernandoescolar/minioidc/internal/api/handlers/responses"
+	"github.com/fernandoescolar/minioidc/internal/api/utils"
 )
 
 type WelcomeHandler struct {
@@ -21,6 +21,6 @@ func NewWelcomeHandler() *WelcomeHandler {
 func (h *WelcomeHandler) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 	_, err := w.Write([]byte(h.message))
 	if err != nil {
-		responses.InternalServerError(w, err.Error())
+		utils.InternalServerError(w, err.Error())
 	}
 }

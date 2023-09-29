@@ -13,8 +13,7 @@ import (
 )
 
 type miniGrantStore struct {
-	sync.RWMutex
-	store        map[string]*miniGrant
+	sync.Map
 	clientStore  domain.ClientStore
 	sessionStore domain.SessionStore
 }
@@ -34,7 +33,6 @@ type miniGrant struct {
 // NewSessionStore initializes the SessionStore for this server
 func NewGrantStore(clientStore domain.ClientStore, sessionStore domain.SessionStore) domain.GrantStore {
 	return &miniGrantStore{
-		store:        make(map[string]*miniGrant),
 		clientStore:  clientStore,
 		sessionStore: sessionStore,
 	}
@@ -54,10 +52,7 @@ func (gs *miniGrantStore) NewCodeGrant(client domain.Client, session domain.Sess
 		codeChallengeMethod: codeChallengeMethod,
 	}
 
-	gs.Lock()
-	defer gs.Unlock()
-	gs.store[grant.id] = grant
-
+	gs.Store(grant.id, grant)
 	return gs.ToGrant(grant)
 }
 
@@ -72,22 +67,17 @@ func (gs *miniGrantStore) NewRefreshTokenGrant(client domain.Client, session dom
 		scopes:    scopesStr,
 	}
 
-	gs.Lock()
-	defer gs.Unlock()
-	gs.store[grant.id] = grant
-
+	gs.Store(grant.id, grant)
 	return gs.ToGrant(grant)
 }
 
 func (gs *miniGrantStore) GetGrantByID(grantID string) (domain.Grant, error) {
-	gs.RLock()
-	defer gs.RUnlock()
-
-	grant, ok := gs.store[grantID]
+	v, ok := gs.Load(grantID)
 	if !ok {
 		return nil, errors.New("grant not found")
 	}
 
+	grant := v.(*miniGrant)
 	return gs.ToGrant(grant)
 }
 
@@ -115,23 +105,18 @@ func (gs *miniGrantStore) GetGrantByIDAndType(id string, grantType domain.GrantT
 }
 
 func (gs *miniGrantStore) Grant(id string) error {
-	gs.Lock()
-	defer gs.Unlock()
-
-	delete(gs.store, id)
-
+	gs.Delete(id)
 	return nil
 }
 
 func (gs *miniGrantStore) CleanExpired() {
-	gs.Lock()
-	defer gs.Unlock()
-
-	for id, grant := range gs.store {
+	gs.Range(func(k, v interface{}) bool {
+		grant := v.(*miniGrant)
 		if grant.expiresAt.Before(time.Now()) {
-			delete(gs.store, id)
+			gs.Delete(k)
 		}
-	}
+		return true
+	})
 }
 
 func (gs *miniGrantStore) ToGrant(grant *miniGrant) (domain.Grant, error) {

@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/fernandoescolar/minioidc/internal/api/handlers/responses"
+	"github.com/fernandoescolar/minioidc/internal/api/utils"
 	"github.com/fernandoescolar/minioidc/pkg/cryptography"
 	"github.com/fernandoescolar/minioidc/pkg/domain"
 	"gopkg.in/square/go-jose.v2"
@@ -25,11 +25,11 @@ func NewJWKSHandler(config *domain.Config) *JWKSHandler {
 func (h *JWKSHandler) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 	jwks, err := h.jwks()
 	if err != nil {
-		responses.InternalServerError(w, err.Error())
+		utils.InternalServerError(w, err.Error())
 		return
 	}
 
-	responses.JSON(w, jwks)
+	utils.JSON(w, jwks)
 }
 
 func (h *JWKSHandler) jwks() ([]byte, error) {

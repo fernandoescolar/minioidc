@@ -11,6 +11,20 @@ minioidc is a lightweight OpenID Connect (OIDC) server designed to provide Singl
 - **Client and User Configuration**: Easily configure client and user data directly in the YAML configuration file.
 - **Flexible Data Storage**: Store grant and session data in memory or use a SQLite v3 database for more persistent storage.
 
+## Roadmap
+
+The following features are planned for future releases:
+
+- [x] OIDC Discovery
+- [x] Authorization Code with PKCE
+- [x] Refresh Token
+- [x] Yaml config file
+- [ ] ENV secrets inside yaml config file
+- [x] Sqlite database for grants and sessions (an also for MFA)
+- [x] MFA with TOTP App (e.g. Google Authenticator)
+- [ ] MFA with email
+- [ ] Ldap Users integration
+
 ## Getting Started
 
 - You can create a docker image and run it with the following commands:
@@ -52,6 +66,7 @@ name: My MiniOIDC
 masterkey: 12345678901234567890123456789012
 issuer: http://example.com
 audience: http://example.com
+require_mfa: true
 private_rsa_key_path: private_key.pem
 ttl:
   access: 20 # minutes
@@ -62,8 +77,12 @@ sqlite:
   filepath: db.sqlite3
   use_in_grants: true
   use_in_sessions: true
+  use_in_mfa: true
 templates:
+  base: templates/base.html
   login: templates/login2.html
+  mfa_create: templates/mfa_create.html
+  mfa_verify: templates/mfa_verify.html
 clients:
   - id: myclient
     secret_hash: $2a$06$L6/zALdtbkYajjHTZUW29ePBEb/hwhgjhXC4YpHANavvKDJl69ctK # secret
@@ -85,6 +104,7 @@ In the root section, you can configure the following settings:
 
 - `issuer` - The OIDC issuer
 - `audience` - The OIDC audience
+- `require_mfa` - Whether to require MFA for all users (default: `false`)
 - `private_rsa_key_path` - The path to the private RSA key (if not set, a new random key will be generated)
 
 In the `ttl` section, you can configure the following TTLs:
@@ -99,10 +119,14 @@ In the `sqlite` section, you can configure the following SQLite settings:
 - `filepath` - The path to the SQLite database file. It is mandatory if `use_in_grants` or `use_in_sessions` is set to `true`.
 - `use_in_grants` - Whether to use the SQLite database for storing grant data (default: `false`)
 - `use_in_sessions` - Whether to use the SQLite database for storing session data (default: `false`)
+- `use_in_mfa` - Whether to use the SQLite database for storing MFA data (default: `false`)
 
 In the `templates` section, you can configure the following html/templates:
 
+- `base` - The base template
 - `login` - The login page template
+- `mfa_create` - The MFA create page template
+- `mfa_verify` - The MFA verify page template
 
 > you can add your static files (like css, js, images, ...) in the `static` folder and use them in your templates (e.g. `<link rel="stylesheet" href="/static/css/style.css">`
 
@@ -179,6 +203,7 @@ The builder has the following fields:
 - `MasterKey string` - Set the OIDC master key use to encrypt and decrypt internal data (if not set, a new random key will be generated)
 - `Audience string` - Set the OIDC audience (it is MANADATORY)
 - `Issuer string` - Set the OIDC issuer (it is MANADATORY)
+- `RequireMFA bool` - Set whether to require MFA for all users (default: `false`)
 - `Clients []Client` - Set the OIDC clients
 - `Users []User` - Set the OIDC users
 - `PrivateKey *rsa.PrivateKey` - Set the OIDC private key
@@ -191,11 +216,15 @@ The builder has the following fields:
 - `UserStore UserStore` - Set the user store
 - `GrantStore GrantStore` - Set the grant store
 - `SessionStore SessionStore` - Set the session store
+- `MFAStore MFAStore` - Set the MFA store
+- `BaseTemplate string` - Set the base template
 - `LoginTemplate string` - Set the login template
+- `MFACreateTemplate string` - Set the MFA create template
+- `MFAVerifyTemplate string` - Set the MFA verify template
 
 And the builder has the following methods:
 
-- `UseSQLite(string, SqliteDatabases)` - Set the SQLite database file path and databases to use (`NoSqliteDatabases`, `OnlyInGrants`, `OnlyInSessions` or `InGrantsAndSessions`)
+- `UseSQLite(string, SqliteDatabases)` - Set the SQLite database file path and databases to use (flags: `NoSqliteDatabases`, `Grants`, `Sessions` or `MFA`)
 
 ## Contributing
 

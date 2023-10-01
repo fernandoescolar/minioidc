@@ -23,14 +23,15 @@ func NewSqliteSessionStore(db *sql.DB, userStore domain.UserStore) domain.Sessio
 }
 
 // NewSession creates a new Session for a User
-func (ss *sqlSessionStore) NewSession(sessionID string, user domain.User, expiresAt time.Time) (domain.Session, error) {
+func (ss *sqlSessionStore) NewSession(sessionID string, user domain.User, expiresAt time.Time, requireMFA bool) (domain.Session, error) {
 	session := &miniSession{
-		id:        sessionID,
-		userID:    user.ID(),
-		expiresAt: expiresAt,
+		id:         sessionID,
+		userID:     user.ID(),
+		requireMFA: requireMFA,
+		expiresAt:  expiresAt,
 	}
 
-	_, err := ss.db.Exec("INSERT INTO sessions VALUES(?,?,?);", session.id, session.userID, session.expiresAt)
+	_, err := ss.db.Exec("INSERT INTO sessions VALUES(?,?,?,?);", session.id, session.userID, session.requireMFA, session.expiresAt)
 	if err != nil {
 		return nil, fmt.Errorf("NewSession: %w", err)
 	}
@@ -41,13 +42,51 @@ func (ss *sqlSessionStore) NewSession(sessionID string, user domain.User, expire
 // GetSessionByID looks up the Session
 func (ss *sqlSessionStore) GetSessionByID(id string) (domain.Session, error) {
 	session := &miniSession{}
-	row := ss.db.QueryRow("SELECT id, userID, expiresAt FROM sessions WHERE id = ?;", id)
-	err := row.Scan(&session.id, &session.userID, &session.expiresAt)
+	row := ss.db.QueryRow("SELECT id, userID, expiresAt, requireMFA FROM sessions WHERE id = ?;", id)
+	err := row.Scan(&session.id, &session.userID, &session.expiresAt, &session.requireMFA)
 	if err != nil {
 		return nil, fmt.Errorf("GetSessionByID: %w", err)
 	}
 
 	return ss.Session(session)
+}
+
+// VerifyMFA checks if the Session has MFA enabled
+func (ss *sqlSessionStore) VerifyMFA(id string) error {
+	r, err := ss.db.Exec("UPDATE sessions SET requireMFA = 0 WHERE id = ?;", id)
+	if err != nil {
+		return fmt.Errorf("VerifyMFA: %w", err)
+	}
+
+	rows, err := r.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("VerifyMFA: %w", err)
+	}
+
+	if rows != 1 {
+		return fmt.Errorf("VerifyMFA: %w", err)
+	}
+
+	return nil
+}
+
+// UpdateTTL updates the TTL for a Session
+func (ss *sqlSessionStore) UpdateTTL(id string, expiresAt time.Time) error {
+	r, err := ss.db.Exec("UPDATE sessions SET expiresAt = ? WHERE id = ?;", expiresAt, id)
+	if err != nil {
+		return fmt.Errorf("UpdateTTL: %w", err)
+	}
+
+	rows, err := r.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("UpdateTTL: %w", err)
+	}
+
+	if rows != 1 {
+		return fmt.Errorf("UpdateTTL: %w", err)
+	}
+
+	return nil
 }
 
 // DeleteUserSessions deletes all sessions for a user
@@ -72,5 +111,5 @@ func (ss *sqlSessionStore) Session(session *miniSession) (domain.Session, error)
 		return nil, fmt.Errorf("Session: %w", err)
 	}
 
-	return domain.NewSession(session.id, user, session.expiresAt), nil
+	return domain.NewSession(session.id, user, session.requireMFA, session.expiresAt), nil
 }

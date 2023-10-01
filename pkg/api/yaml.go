@@ -14,6 +14,7 @@ type YamlConfig struct {
 
 	Issuer            string `yaml:"issuer"`
 	Audience          string `yaml:"audience"`
+	RequireMFA        bool   `yaml:"require_mfa"`
 	PrivateRSAKeyPath string `yaml:"private_rsa_key_path"`
 
 	TTL struct {
@@ -24,13 +25,17 @@ type YamlConfig struct {
 	} `yaml:"ttl"`
 
 	Templates struct {
-		Login string `yaml:"login"`
+		Base      string `yaml:"base"`
+		Login     string `yaml:"login"`
+		MFACreate string `yaml:"mfa_create"`
+		MFAVerify string `yaml:"mfa_verify"`
 	} `yaml:"templates"`
 
 	Sqlite struct {
 		Filepath      string `yaml:"filepath"`
 		UseInGrants   bool   `yaml:"use_in_grants"`
 		UseInSessions bool   `yaml:"use_in_sessions"`
+		UseInMFA      bool   `yaml:"use_in_mfa"`
 	} `yaml:"sqlite"`
 
 	Clients []struct {
@@ -62,13 +67,14 @@ func NewYamlBuilder(filepath string) (*Builder, error) {
 	}
 
 	sqliteDatabases := NoSqliteDatabases
-	switch {
-	case yamlConfig.Sqlite.UseInGrants && yamlConfig.Sqlite.UseInSessions:
-		sqliteDatabases = InGrantsAndSessions
-	case yamlConfig.Sqlite.UseInGrants:
-		sqliteDatabases = OnlyInGrants
-	case yamlConfig.Sqlite.UseInSessions:
-		sqliteDatabases = OnlyInSessions
+	if yamlConfig.Sqlite.UseInGrants {
+		sqliteDatabases = sqliteDatabases | Grants
+	}
+	if yamlConfig.Sqlite.UseInSessions {
+		sqliteDatabases = sqliteDatabases | Sessions
+	}
+	if yamlConfig.Sqlite.UseInMFA {
+		sqliteDatabases = sqliteDatabases | MFA
 	}
 
 	clients := make([]Client, len(yamlConfig.Clients))
@@ -98,14 +104,21 @@ func NewYamlBuilder(filepath string) (*Builder, error) {
 		MasterKey:             yamlConfig.MasterKey,
 		Issuer:                yamlConfig.Issuer,
 		Audience:              yamlConfig.Audience,
+		RequireMFA:            yamlConfig.RequireMFA,
 		PrivateRSAKeyFilepath: yamlConfig.PrivateRSAKeyPath,
-		LoginTemplateFilepath: yamlConfig.Templates.Login,
-		AccessTTL:             time.Duration(yamlConfig.TTL.Access) * time.Minute,
-		RefreshTTL:            time.Duration(yamlConfig.TTL.Refresh) * time.Minute,
-		SessionTTL:            time.Duration(yamlConfig.TTL.Session) * time.Minute,
-		CodeTTL:               time.Duration(yamlConfig.TTL.Code) * time.Minute,
-		Clients:               clients,
-		Users:                 users,
+
+		BaseTemplateFilepath:      yamlConfig.Templates.Base,
+		LoginTemplateFilepath:     yamlConfig.Templates.Login,
+		MFACreateTemplateFilepath: yamlConfig.Templates.MFACreate,
+		MFAVerifyTemplateFilepath: yamlConfig.Templates.MFAVerify,
+
+		AccessTTL:  time.Duration(yamlConfig.TTL.Access) * time.Minute,
+		RefreshTTL: time.Duration(yamlConfig.TTL.Refresh) * time.Minute,
+		SessionTTL: time.Duration(yamlConfig.TTL.Session) * time.Minute,
+		CodeTTL:    time.Duration(yamlConfig.TTL.Code) * time.Minute,
+
+		Clients: clients,
+		Users:   users,
 	}
 
 	builder.UseSQLite(yamlConfig.Sqlite.Filepath, sqliteDatabases)

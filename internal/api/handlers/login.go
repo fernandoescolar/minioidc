@@ -5,30 +5,35 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/fernandoescolar/minioidc/internal/api/utils"
 	"github.com/fernandoescolar/minioidc/pkg/cryptography"
 	"github.com/fernandoescolar/minioidc/pkg/domain"
 	"github.com/google/uuid"
 )
 
 type LoginHandler struct {
-	now              func() time.Time
-	templateFilepath string
-	sessionTTL       time.Duration
-	sessionStore     domain.SessionStore
-	userStore        domain.UserStore
-	masterKey        string
+	name         string
+	now          func() time.Time
+	templates    []string
+	sessionTTL   time.Duration
+	sessionStore domain.SessionStore
+	userStore    domain.UserStore
+	masterKey    string
+	requireMFA   bool
 }
 
 var _ http.Handler = (*LoginHandler)(nil)
 
 func NewLoginHandler(config *domain.Config, now func() time.Time) *LoginHandler {
 	return &LoginHandler{
-		now:              now,
-		templateFilepath: config.LoginTemplateFilepath,
-		sessionTTL:       config.SessionTTL,
-		sessionStore:     config.SessionStore,
-		userStore:        config.UserStore,
-		masterKey:        config.MasterKey,
+		name:         config.Name,
+		now:          now,
+		templates:    []string{config.BaseTemplateFilepath, config.LoginTemplateFilepath},
+		sessionTTL:   config.SessionTTL,
+		sessionStore: config.SessionStore,
+		userStore:    config.UserStore,
+		masterKey:    config.MasterKey,
+		requireMFA:   config.RequireMFA,
 	}
 }
 
@@ -56,14 +61,11 @@ func (h *LoginHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *LoginHandler) getHTTP(w http.ResponseWriter, _ *http.Request) {
-	// returnURL := getReturnURL(r)
-	// returnURL, _ = url.QueryUnescape(returnURL)
-
 	h.renderLoginPage(w, "", false, false)
 }
 
 func (h *LoginHandler) postHTTP(w http.ResponseWriter, r *http.Request) {
-	returnURL := getReturnURL(r)
+	returnURL := utils.GetReturnURL(r)
 	username := r.FormValue("username")
 	password := r.FormValue("password")
 
@@ -79,7 +81,7 @@ func (h *LoginHandler) postHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	expiresAt := h.now().Add(h.sessionTTL)
-	session, err := h.sessionStore.NewSession(uuid.New().String(), user, expiresAt)
+	session, err := h.sessionStore.NewSession(uuid.New().String(), user, expiresAt, h.requireMFA)
 	if err != nil {
 		h.renderLoginPage(w, username, false, true)
 		return
@@ -114,27 +116,19 @@ func (h *LoginHandler) deleteHTTP(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (h *LoginHandler) renderLoginPage(w http.ResponseWriter, username string, invalidLogin bool, unknownError bool) {
-	tmpl, err := template.ParseFiles(h.templateFilepath)
+	tmpl, err := template.ParseFiles(h.templates...)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	err = tmpl.Execute(w, struct {
+		Name                       string
 		Username                   string
 		InvalidLogin, UnknownError bool
-	}{username, invalidLogin, unknownError})
+	}{h.name, username, invalidLogin, unknownError})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-}
-
-func getReturnURL(req *http.Request) string {
-	returnURL := req.URL.Query().Get("return_url")
-	if returnURL == "" {
-		returnURL = "/"
-	}
-
-	return returnURL
 }

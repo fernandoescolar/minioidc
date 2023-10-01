@@ -3,32 +3,47 @@ package cryptography
 import (
 	"crypto/hmac"
 	"crypto/sha256"
-	"encoding/binary"
+	"encoding/base32"
 	"fmt"
 	"hash"
 	"math"
+	"strings"
 	"time"
 )
 
 // / The specifications for this are found in RFC 6238
 // / http://tools.ietf.org/html/rfc6238
 type TOTP struct {
+	secret    string
 	secretKey []byte
 	step      int
 	digits    int
 }
 
+func NewTOTPDefault(secret string) *TOTP {
+	return NewTOTP(secret, 30, 6)
+}
+
 // NewTOTP creates a new TOTP instance with the provided parameters.
-func NewTOTP(secretKey []byte, step, digits int) *TOTP {
+func NewTOTP(secret string, step, digits int) *TOTP {
 	if step <= 0 || digits <= 0 || digits > 10 {
 		panic("Invalid step or digits")
 	}
-	paddedKeyLength := int(math.Ceil(float64(len(secretKey))/16.0) * 16)
-	secretKeyPadded := make([]byte, paddedKeyLength)
-	copy(secretKeyPadded, secretKey)
+
+	secretKey := secret
+	missingPadding := len(secret) % 8
+	if missingPadding != 0 {
+		secretKey = secretKey + strings.Repeat("=", 8-missingPadding)
+	}
+
+	secretBytes, err := base32.StdEncoding.DecodeString(secretKey)
+	if err != nil {
+		panic("decode secret failed")
+	}
 
 	return &TOTP{
-		secretKey: secretKeyPadded,
+		secret:    secret,
+		secretKey: secretBytes,
 		step:      step,
 		digits:    digits,
 	}
@@ -38,7 +53,7 @@ func (t *TOTP) Uri(issuer, account string) string {
 	return fmt.Sprintf("otpauth://totp/%s:%s?secret=%s&issuer=%s&algorithm=%s&digits=%d&period=%d",
 		issuer,
 		account,
-		t.secretKey,
+		t.secret,
 		issuer,
 		"SHA256",
 		t.digits,
@@ -49,29 +64,23 @@ func (t *TOTP) Uri(issuer, account string) string {
 
 // Compute generates a TOTP code based on the current time.
 func (t *TOTP) Compute() string {
-	counter := t.calculateTimeStepFromTimestamp(time.Now())
+	return t.ComputeAt(time.Now())
+}
+
+func (t *TOTP) ComputeAt(time time.Time) string {
+	counter := t.calculateTimeStepFromTimestamp(time)
 	return t.compute(counter)
 }
 
 // Verify checks if the provided valueToVerify is a valid TOTP code for the current time or a time range.
 func (t *TOTP) Verify(valueToVerify string, from, to int) bool {
-	counter := t.calculateTimeStepFromTimestamp(time.Now())
-	for i := from; i <= to; i++ {
-		if t.valuesEqual(t.compute(counter+int64(i)), valueToVerify) {
-			return true
-		}
-	}
-
-	return false
+	return t.VerifyAt(valueToVerify, time.Now(), from, to)
 }
 
-// VerifyHash checks if the provided hashToVerify is a valid TOTP code (after applying the hashAction) for the current time or a time range.
-func (t *TOTP) VerifyHash(hashToVerify string, hashAction func(string) string, from, to int) bool {
-	counter := t.calculateTimeStepFromTimestamp(time.Now())
+func (t *TOTP) VerifyAt(valueToVerify string, time time.Time, from, to int) bool {
+	counter := t.calculateTimeStepFromTimestamp(time)
 	for i := from; i <= to; i++ {
-		code := t.compute(counter + int64(i))
-		actual := hashAction(code)
-		if t.valuesEqual(actual, hashToVerify) {
+		if t.valuesEqual(t.compute(counter+int64(i)), valueToVerify) {
 			return true
 		}
 	}
@@ -89,12 +98,10 @@ func (t *TOTP) compute(counter int64) string {
 func (t *TOTP) calculateOTP(data []byte) int {
 	hmacComputedHash := t.calculateHMAC(data)
 	offset := int(hmacComputedHash[len(hmacComputedHash)-1] & 0x0F)
-	binary.BigEndian.PutUint32(hmacComputedHash[offset:], binary.BigEndian.Uint32(hmacComputedHash[offset:])&0x7FFFFFFF)
-
-	return int(hmacComputedHash[offset])<<24 |
-		int(hmacComputedHash[offset+1])<<16 |
-		int(hmacComputedHash[offset+2])<<8 |
-		int(hmacComputedHash[offset+3])%1000000
+	return int(hmacComputedHash[offset]&0x7f)<<24 |
+		int(hmacComputedHash[offset+1]&0xff)<<16 |
+		int(hmacComputedHash[offset+2]&0xff)<<8 |
+		int(hmacComputedHash[offset+3]&0xff)%1000000
 }
 
 func (t *TOTP) calculateHMAC(data []byte) []byte {
@@ -123,13 +130,17 @@ func (t *TOTP) calculateTimeStepFromTimestamp(timestamp time.Time) int64 {
 }
 
 func (t *TOTP) getBigEndianBytes(input int64) []byte {
-	data := make([]byte, 8)
-	binary.BigEndian.PutUint64(data, uint64(input))
-	return data
+	byteArr := make([]byte, 8)
+	for i := 7; i >= 0; i-- {
+		byteArr[i] = byte(input & 0xff)
+		input = input >> 8
+	}
+
+	return byteArr
 }
 
 func (t *TOTP) digitsFormat(input int, digitCount int) string {
-	truncatedValue := input % int(math.Pow(10, float64(digitCount)))
+	truncatedValue := input % int(math.Pow10(digitCount))
 	format := fmt.Sprintf("%%0%dd", digitCount)
 	return fmt.Sprintf(format, truncatedValue)
 }

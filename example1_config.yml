@@ -2,6 +2,7 @@ name: My MiniOIDC
 masterkey: 12345678901234567890123456789012
 issuer: http://localhost:8000/
 audience: http://localhost:8000/
+require_mfa: true
 private_rsa_key_path: private.pem
 ttl:
   access: 20 # minutes
@@ -12,6 +13,7 @@ sqlite:
   filepath: db.sqlite3
   use_in_grants: true
   use_in_sessions: true
+  use_in_mfa: true
 clients:
   - id: myclient
     secret_hash: $2a$06$L6/zALdtbkYajjHTZUW29ePBEb/hwhgjhXC4YpHANavvKDJl69ctK # secret

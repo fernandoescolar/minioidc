@@ -16,9 +16,10 @@ type miniSessionStore struct {
 }
 
 type miniSession struct {
-	id        string
-	userID    string
-	expiresAt time.Time
+	id         string
+	userID     string
+	requireMFA bool
+	expiresAt  time.Time
 }
 
 // NewSessionStore initializes the SessionStore for this server
@@ -29,11 +30,12 @@ func NewSessionStore(userStore domain.UserStore) domain.SessionStore {
 }
 
 // NewSession creates a new Session for a User
-func (ss *miniSessionStore) NewSession(sessionID string, user domain.User, expiresAt time.Time) (domain.Session, error) {
+func (ss *miniSessionStore) NewSession(sessionID string, user domain.User, expiresAt time.Time, requireMFA bool) (domain.Session, error) {
 	session := &miniSession{
-		id:        sessionID,
-		userID:    user.ID(),
-		expiresAt: expiresAt,
+		id:         sessionID,
+		userID:     user.ID(),
+		requireMFA: requireMFA,
+		expiresAt:  expiresAt,
 	}
 
 	ss.Store(sessionID, session)
@@ -51,6 +53,35 @@ func (ss *miniSessionStore) GetSessionByID(id string) (domain.Session, error) {
 	return ss.Session(session)
 }
 
+// VerifyMFA checks if the Session has MFA enabled
+func (ss *miniSessionStore) VerifyMFA(id string) error {
+	v, ok := ss.Load(id)
+	if !ok {
+		return errors.New("session not found")
+	}
+
+	session := v.(*miniSession)
+	session.requireMFA = false
+	ss.Store(id, session)
+
+	return nil
+}
+
+// UpdateTTL updates the TTL for a Session
+func (ss *miniSessionStore) UpdateTTL(id string, expiresAt time.Time) error {
+	v, ok := ss.Load(id)
+	if !ok {
+		return errors.New("session not found")
+	}
+
+	session := v.(*miniSession)
+	session.expiresAt = expiresAt
+	ss.Store(id, session)
+
+	return nil
+}
+
+// DeleteUserSessions removes all Sessions for a User
 func (ss *miniSessionStore) DeleteUserSessions(userID string) {
 	ss.Range(func(k, v interface{}) bool {
 		session := v.(*miniSession)
@@ -61,6 +92,7 @@ func (ss *miniSessionStore) DeleteUserSessions(userID string) {
 	})
 }
 
+// CleanExpired removes all expired Sessions
 func (ss *miniSessionStore) CleanExpired() {
 	ss.Range(func(k, v interface{}) bool {
 		session := v.(*miniSession)
@@ -77,5 +109,5 @@ func (ss *miniSessionStore) Session(session *miniSession) (domain.Session, error
 		return nil, fmt.Errorf("Session: %w", err)
 	}
 
-	return domain.NewSession(session.id, user, session.expiresAt), nil
+	return domain.NewSession(session.id, user, session.requireMFA, session.expiresAt), nil
 }

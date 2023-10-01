@@ -17,10 +17,11 @@ import (
 type SqliteDatabases int
 
 const (
-	NoSqliteDatabases SqliteDatabases = iota
-	OnlyInGrants
-	OnlyInSessions
-	InGrantsAndSessions
+	NoSqliteDatabases SqliteDatabases = 0
+	Grants                            = 1
+	Sessions                          = 2
+	MFA                               = 4
+	All               SqliteDatabases = Grants | Sessions | MFA
 )
 
 type Builder struct {
@@ -28,6 +29,7 @@ type Builder struct {
 	MasterKey             string
 	Issuer                string
 	Audience              string
+	RequireMFA            bool
 	PrivateRSAKeyFilepath string
 	PrivateRSAKey         *rsa.PrivateKey
 
@@ -36,16 +38,21 @@ type Builder struct {
 	SessionTTL time.Duration
 	CodeTTL    time.Duration
 
-	LoginTemplateFilepath string
+	BaseTemplateFilepath      string
+	LoginTemplateFilepath     string
+	MFACreateTemplateFilepath string
+	MFAVerifyTemplateFilepath string
 
 	ClientStore  domain.ClientStore
 	GrantStore   domain.GrantStore
 	SessionStore domain.SessionStore
 	UserStore    domain.UserStore
+	MFACodeStore domain.MFACodeStore
 
 	sqliteFilepath      string
 	sqliteUseInGrants   bool
 	sqliteUseInSessions bool
+	sqliteUseInMFA      bool
 
 	Clients []Client
 	Users   []User
@@ -70,20 +77,18 @@ type User struct {
 // UseSQLite sets the sqlite filepath and the databases where it will be used
 func (b *Builder) UseSQLite(f string, d SqliteDatabases) {
 	b.sqliteFilepath = f
+	b.sqliteUseInGrants = false
+	b.sqliteUseInSessions = false
+	b.sqliteUseInMFA = false
 
-	switch d {
-	case OnlyInGrants:
+	if d&Grants == Grants {
 		b.sqliteUseInGrants = true
-		b.sqliteUseInSessions = false
-	case OnlyInSessions:
-		b.sqliteUseInGrants = false
+	}
+	if d&Sessions == Sessions {
 		b.sqliteUseInSessions = true
-	case InGrantsAndSessions:
-		b.sqliteUseInGrants = true
-		b.sqliteUseInSessions = true
-	default:
-		b.sqliteUseInGrants = false
-		b.sqliteUseInSessions = false
+	}
+	if d&MFA == MFA {
+		b.sqliteUseInMFA = true
 	}
 }
 
@@ -168,8 +173,17 @@ func (b *Builder) assignDefaults() error {
 	if b.CodeTTL == 0 {
 		b.CodeTTL = defaultCodeTTL * time.Minute
 	}
+	if b.BaseTemplateFilepath == "" {
+		b.BaseTemplateFilepath = "templates/base.html"
+	}
 	if b.LoginTemplateFilepath == "" {
-		b.LoginTemplateFilepath = "templates/login1.html"
+		b.LoginTemplateFilepath = "templates/login.html"
+	}
+	if b.MFACreateTemplateFilepath == "" {
+		b.MFACreateTemplateFilepath = "templates/mfa_create.html"
+	}
+	if b.MFAVerifyTemplateFilepath == "" {
+		b.MFAVerifyTemplateFilepath = "templates/mfa_verify.html"
 	}
 
 	return nil
@@ -177,17 +191,21 @@ func (b *Builder) assignDefaults() error {
 
 func (b *Builder) config() (*domain.Config, error) {
 	config := &domain.Config{
-		Name:      b.Name,
-		MasterKey: b.MasterKey,
-		Issuer:    b.Issuer,
-		Audience:  b.Audience,
+		Name:       b.Name,
+		MasterKey:  b.MasterKey,
+		Issuer:     b.Issuer,
+		Audience:   b.Audience,
+		RequireMFA: b.RequireMFA,
 
 		AccessTTL:  b.AccessTTL,
 		RefreshTTL: b.RefreshTTL,
 		SessionTTL: b.SessionTTL,
 		CodeTTL:    b.CodeTTL,
 
-		LoginTemplateFilepath: b.LoginTemplateFilepath,
+		BaseTemplateFilepath:      b.BaseTemplateFilepath,
+		LoginTemplateFilepath:     b.LoginTemplateFilepath,
+		MFACreateTemplateFilepath: b.MFACreateTemplateFilepath,
+		MFAVerifyTemplateFilepath: b.MFAVerifyTemplateFilepath,
 	}
 
 	if err := b.assignPrivateKey(config); err != nil {
@@ -238,6 +256,7 @@ func (b *Builder) assignStores(config *domain.Config) error {
 		grantStore   domain.GrantStore
 		sessionStore domain.SessionStore
 		userStore    domain.UserStore
+		mfaStore     domain.MFACodeStore
 		sqlite       *sql.DB
 		err          error
 	)
@@ -279,10 +298,20 @@ func (b *Builder) assignStores(config *domain.Config) error {
 		grantStore = b.GrantStore
 	}
 
+	switch {
+	case b.sqliteUseInMFA:
+		mfaStore = stores.NewSqliteMFACodeStore(sqlite, userStore)
+	case b.MFACodeStore == nil:
+		mfaStore = stores.NewMFACodeStore(userStore)
+	default:
+		mfaStore = b.MFACodeStore
+	}
+
 	config.ClientStore = clientStore
 	config.GrantStore = grantStore
 	config.SessionStore = sessionStore
 	config.UserStore = userStore
+	config.MFACodeStore = mfaStore
 
 	return nil
 }

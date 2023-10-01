@@ -1,0 +1,38 @@
+{{define "content"}}
+<form class="form" method="post">
+    <p>Scan this QR using your favorite auth app:</p>
+    <div id="qrcode"></div>
+    <p class="error">
+        {{ if .InvalidVerificationCode }}
+        ⚠️ Invalid verification code
+        {{ end }}
+        {{ if .UnknownError }}
+        ☢️ Error. Try it again later or contact the administrator.
+        {{ end }}
+    </p>
+    <p>Verify the code your auth app is showing:</p>
+    <div class="otp-wrapper">
+        <input type="text"
+            autocomplete="one-time-code"
+            inputmode="numeric"
+            maxlength="6"
+            pattern="\d{6}"
+            name="verification_code" />
+
+        <button id="verify" type="submit">Verify</button>
+    </div>
+    <input type="hidden" name="verification_iv" value="{{.IV}}" />
+
+</form>
+<script src="/static/qrcode.min.js"></script>
+<script>
+    new QRCode(document.getElementById("qrcode"), {
+        text: "{{.QRCode}}",
+        width: 256,
+        height: 256,
+        colorDark: "#000000",
+        colorLight: "#ffffff",
+        correctLevel: QRCode.CorrectLevel.H
+    });
+</script>
+{{end}}

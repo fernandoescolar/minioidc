@@ -3,7 +3,7 @@ body {
     font-family: sans-serif;
 }
 
-.login {
+.form {
     overflow: hidden;
     background-color: white;
     padding: 40px 30px 30px 30px;
@@ -23,8 +23,8 @@ body {
     box-shadow: 5px 10px 10px rgba(2, 128, 144, 0.2);
 }
 
-.login::before,
-.login::after {
+.form::before,
+.form::after {
     content: "";
     position: absolute;
     width: 600px;
@@ -36,7 +36,7 @@ body {
     z-index: -1;
 }
 
-.login::before {
+.form::before {
     left: 40%;
     bottom: -130%;
     background-color: rgba(69, 105, 144, 0.15);
@@ -45,7 +45,7 @@ body {
     animation: wawes 6s infinite linear;
 }
 
-.login::after {
+.form::after {
     left: 35%;
     bottom: -125%;
     background-color: rgba(2, 128, 144, 0.2);
@@ -54,7 +54,7 @@ body {
     animation: wawes 7s infinite;
 }
 
-.login>input {
+.form>input {
     font-family: sans-serif;
     display: block;
     border-radius: 5px;
@@ -66,7 +66,7 @@ body {
     margin: 15px -10px;
 }
 
-.login>button {
+.form button {
     font-family: sans-serif;
     cursor: pointer;
     color: #fff;
@@ -84,7 +84,7 @@ body {
     transition: background-color 300ms;
 }
 
-.login>button:hover {
+.form button:hover {
     background-color: #f24353;
 }
 
@@ -96,6 +96,53 @@ body {
     margin-top: 5px;
 }
 
+#verify {
+    margin-top: 32px;
+}
+
+#qrcode {
+    margin: 0px auto!important;
+    max-width: 256px;
+}
+
+.otp-wrapper {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    margin: 0px auto!important;
+    max-width: 256px;
+}
+
+:where([autocomplete=one-time-code]) {
+    --otp-digits: 6;
+    --otc-ls: 2ch;
+    --otc-gap: 1.25;
+    --_otp-bgsz: calc(var(--otc-ls) + 1ch);
+    all: unset;
+    background: linear-gradient(90deg, var(--otc-bg, #EEE) calc(var(--otc-gap) * var(--otc-ls)), transparent 0 ) 0 0 / var(--_otp-bgsz) 100% !important;
+    caret-color: var(--otc-cc, #333) !important;
+    clip-path: inset(0% calc(var(--otc-ls) / 2) 0% 0%);
+    font-family: ui-monospace, monospace !important;
+    font-size: var(--otc-fz, 1.5em) !important;
+    inline-size: calc(var(--otc-digits) * var(--_otp-bgsz));
+    letter-spacing: var(--otc-ls);
+    padding-block: var(--otc-pb, 1ch);
+    padding-inline-start: calc(((var(--otc-ls) - 1ch) / 2) * var(--otc-gap));
+    max-width: 256px;
+    margin-left: 12px;
+}
+
+a {
+
+    font-size: 16px;
+    text-decoration: none;
+    color: rgba(255, 255, 255, 0.6);
+    position: absolute;
+    right: 10px;
+    bottom: 10px;
+    font-size: 12px;
+}
 
 @-webkit-keyframes wawes {
     from {
@@ -135,19 +182,8 @@ body {
     }
 }
 
-a {
-
-    font-size: 16px;
-    text-decoration: none;
-    color: rgba(255, 255, 255, 0.6);
-    position: absolute;
-    right: 10px;
-    bottom: 10px;
-    font-size: 12px;
-}
-
 @media (max-width: 720px) {
-    .login {
+    .form {
         width: 80%;
     }
 }

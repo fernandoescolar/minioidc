@@ -13,6 +13,7 @@ const createSqlite string = `
   CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY,
 	userID TEXT NOT NULL,
+	requireMFA INTEGER DEFAULT 1,
 	expiresAt DATETIME NOT NULL
   );
   CREATE TABLE IF NOT EXISTS grants (
@@ -25,6 +26,12 @@ const createSqlite string = `
 	nonce TEXT,
 	codeChallenge TEXT,
 	codeChallengeMethod TEXT
+  );
+  CREATE TABLE IF NOT EXISTS mfa (
+	id TEXT PRIMARY KEY,
+	userID TEXT NOT NULL,
+	secret TEXT NOT NULL,
+	method TEXT NOT NULL
   );`
 
 func NewSqliteDB(filepath string) (*sql.DB, error) {

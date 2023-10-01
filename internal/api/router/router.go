@@ -18,13 +18,18 @@ const (
 	UserinfoEndpoint      = OAuthEndpoint + "userinfo"
 	JWKSEndpoint          = WellKnownEndpoint + "jwks.json"
 	DiscoveryEndpoint     = WellKnownEndpoint + "openid-configuration"
+	MFAEnpoint            = "/mfa"
+	MFACreateEndpoint     = MFAEnpoint + "/create"
+	MFAVerifyEndpoint     = MFAEnpoint + "/verify"
 	LoginEndpoint         = "/login"
 	StaticEndpoint        = "/static/"
 )
 
 func CreateMinioidcRoutes(mux *http.ServeMux, config *domain.Config, now func() time.Time) http.Handler {
 	loggerMiddleware := middlewares.NewLogger()
-	sessionMiddleware := middlewares.NewSessionAuthorized(config, LoginEndpoint, []string{WellKnownEndpoint, TokenEndpoint, UserinfoEndpoint, StaticEndpoint, LoginEndpoint})
+	sessionMiddleware := middlewares.NewSessionAuthorized(config, now, LoginEndpoint, []string{WellKnownEndpoint, TokenEndpoint, UserinfoEndpoint, StaticEndpoint, LoginEndpoint})
+	sessionMFARequired := middlewares.NewSessionMFARequired(config, MFACreateEndpoint, MFAVerifyEndpoint)
+	updateSessionTTL := middlewares.NewUpdateSessionTTL(config, now)
 
 	discoveryHandler := handlers.NewDiscoveryHandler(config.Issuer, AuthorizationEndpoint, TokenEndpoint, JWKSEndpoint, UserinfoEndpoint)
 	jwksHandler := handlers.NewJWKSHandler(config)
@@ -32,6 +37,8 @@ func CreateMinioidcRoutes(mux *http.ServeMux, config *domain.Config, now func() 
 	tokenHanlder := handlers.NewTokenHandler(config, now)
 	userinfoHandler := handlers.NewUserinfoHandler(config, now)
 	loginHandler := handlers.NewLoginHandler(config, now)
+	mfaCreateHandler := handlers.NewMfaCreateHandler(config)
+	MFAVerifyHandler := handlers.NewMfaVerifyHandler(config)
 	welcomeHandler := handlers.NewWelcomeHandler()
 
 	mux.Handle(DiscoveryEndpoint, discoveryHandler)
@@ -40,17 +47,21 @@ func CreateMinioidcRoutes(mux *http.ServeMux, config *domain.Config, now func() 
 	mux.Handle(TokenEndpoint, tokenHanlder)
 	mux.Handle(UserinfoEndpoint, userinfoHandler)
 	mux.Handle(LoginEndpoint, loginHandler)
+	mux.Handle(MFACreateEndpoint, mfaCreateHandler)
+	mux.Handle(MFAVerifyEndpoint, MFAVerifyHandler)
 	mux.Handle(IssuerBase, welcomeHandler)
 	mux.Handle(StaticEndpoint, http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
 
-	return createMiddlewareChain(mux, loggerMiddleware, sessionMiddleware)
+	return createMiddlewareChain(mux, loggerMiddleware, sessionMiddleware, sessionMFARequired, updateSessionTTL)
 }
 
 func createMiddlewareChain(mux *http.ServeMux, middlewares ...domain.Middleware) http.Handler {
 	var handler http.Handler
 	handler = mux
-	for _, middleware := range middlewares {
-		handler = wrapHandlerWithMiddleware(handler, middleware)
+
+	// apply middlewares in reverse order
+	for i := len(middlewares) - 1; i >= 0; i-- {
+		handler = wrapHandlerWithMiddleware(handler, middlewares[i])
 	}
 
 	return handler

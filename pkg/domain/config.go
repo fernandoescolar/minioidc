@@ -16,6 +16,8 @@ type Config struct {
 	Issuer string
 	// is the audience set in JWTs.
 	Audience string
+	// if true, the server will require MFA for all users.
+	RequireMFA bool
 	// is the path to the private RSA key used to sign JWTs.
 	Keypair *cryptography.Keypair
 
@@ -36,7 +38,15 @@ type Config struct {
 	SessionStore SessionStore
 	// is the store used to save users.
 	UserStore UserStore
+	// is the store used to save MFA codes.
+	MFACodeStore MFACodeStore
 
+	// is the filepath of the base template.
+	BaseTemplateFilepath string
 	// the filepath of the login template.
 	LoginTemplateFilepath string
+	// the filepath of the MFA template.
+	MFACreateTemplateFilepath string
+	// the filepath of the MFA template.
+	MFAVerifyTemplateFilepath string
 }

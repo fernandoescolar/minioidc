@@ -18,9 +18,10 @@ The following features are planned for future releases:
 - [x] OIDC Discovery
 - [x] Authorization Code with PKCE
 - [x] Refresh Token
+- [ ] CSRF 
 - [x] Yaml config file
 - [ ] ENV secrets inside yaml config file
-- [x] Sqlite database for grants and sessions (an also for MFA)
+- [x] Sqlite database for grants and sessions (and also for MFA)
 - [x] MFA with TOTP App (e.g. Google Authenticator)
 - [ ] MFA with email
 - [ ] Ldap Users integration

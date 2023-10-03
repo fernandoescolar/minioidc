@@ -44,6 +44,7 @@ type Builder struct {
 	RefreshTTL time.Duration
 	SessionTTL time.Duration
 	CodeTTL    time.Duration
+	CSRFTTL    time.Duration
 
 	BaseTemplateFilepath      string
 	LoginTemplateFilepath     string
@@ -145,6 +146,7 @@ const (
 	defaultRefreshTTL = 129600
 	defaultSessionTTL = 129600
 	defaultCodeTTL    = 5
+	defaultCSRFTTL    = 5
 	defaultRSASize    = 2048
 )
 
@@ -179,6 +181,9 @@ func (b *Builder) assignDefaults() error {
 	}
 	if b.CodeTTL == 0 {
 		b.CodeTTL = defaultCodeTTL * time.Minute
+	}
+	if b.CSRFTTL == 0 {
+		b.CSRFTTL = defaultCSRFTTL * time.Minute
 	}
 	if b.BaseTemplateFilepath == "" {
 		b.BaseTemplateFilepath = "templates/base.html"
@@ -215,6 +220,7 @@ func (b *Builder) config() (*domain.Config, error) {
 		RefreshTTL: b.RefreshTTL,
 		SessionTTL: b.SessionTTL,
 		CodeTTL:    b.CodeTTL,
+		CSRFTTL:    b.CSRFTTL,
 
 		BaseTemplateFilepath:      b.BaseTemplateFilepath,
 		LoginTemplateFilepath:     b.LoginTemplateFilepath,

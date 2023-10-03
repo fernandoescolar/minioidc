@@ -20,7 +20,7 @@ The following features are planned for future releases:
 - [x] Refresh Token
 - [x] CSRF
 - [x] Yaml config file
-- [ ] ENV secrets inside yaml config file
+- [x] ENV secrets inside yaml config file
 - [x] Sqlite database for grants and sessions (and also for MFA)
 - [x] MFA with TOTP App (e.g. Google Authenticator)
 - [ ] MFA with email
@@ -81,6 +81,7 @@ ttl:
   refresh: 129600 # 90 days
   session: 129600 # 90 days
   code: 5 # minutes
+  csrf: 5 # minutes
 sqlite:
   filepath: db.sqlite3
   use_in_grants: true
@@ -130,6 +131,7 @@ In the `ttl` section, you can configure the following TTLs:
 - `refresh` - The refresh token TTL in minutes (default: `129600`, 90 days)
 - `session` - The session TTL in minutes (default: `129600`, 90 days)
 - `code` - The authorization code TTL in minutes (default: `5`)
+- `csrf` - The CSRF token TTL in minutes (default: `5`)
 
 In the `sqlite` section, you can configure the following SQLite settings:
 
@@ -221,6 +223,12 @@ The builder has the following fields:
 - `Audience string` - Set the OIDC audience (it is MANADATORY)
 - `Issuer string` - Set the OIDC issuer (it is MANADATORY)
 - `RequireMFA bool` - Set whether to require MFA for all users (default: `false`)
+- `ReuseRefreshTokens bool` - Set whether to allow re-use refresh tokens (default: `false`)
+- `UseHSTS bool` - Set whether to enable HTTP Strict Transport Security (HSTS) (default: `false`)
+- `UseCSP bool` - Set whether to enable Content Security Policy (CSP) (default: `false`)
+- `UseSecureCookie bool` - Set whether to enable secure cookies (default: `false`)
+- `UseForwardedHeaders bool` - Set whether to forward headers (default: `false`)
+- `LogRequests bool` - Set whether to log requests (default: `false`)
 - `Clients []Client` - Set the OIDC clients
 - `Users []User` - Set the OIDC users
 - `PrivateKey *rsa.PrivateKey` - Set the OIDC private key
@@ -229,6 +237,7 @@ The builder has the following fields:
 - `RefreshTTL time.Duration` - Set the refresh token TTL
 - `SessionTTL time.Duration` - Set the session TTL
 - `CodeTTL time.Duration` - Set the authorization code TTL
+- `CSRFTTL time.Duration` - Set the CSRF token TTL
 - `ClientStore ClientStore` - Set the client store
 - `UserStore UserStore` - Set the user store
 - `GrantStore GrantStore` - Set the grant store

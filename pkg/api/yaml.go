@@ -31,6 +31,7 @@ type YamlConfig struct {
 		Refresh int `yaml:"refresh"`
 		Session int `yaml:"session"`
 		Code    int `yaml:"code"`
+		CSRF    int `yaml:"csrf"`
 	} `yaml:"ttl"`
 
 	Templates struct {
@@ -71,6 +72,17 @@ func NewYamlBuilder(filepath string) (*Builder, error) {
 		return nil, fmt.Errorf("Build: %w", err)
 	}
 
+	// load environment variables
+	ystring := os.Expand(string(yfile), func(key string) string {
+		v := os.Getenv(key)
+		if v == "" {
+			return "$" + key
+		}
+
+		return v
+	})
+
+	yfile = []byte(ystring)
 	if err = yaml.Unmarshal(yfile, yamlConfig); err != nil {
 		return nil, fmt.Errorf("Build: %w", err)
 	}
@@ -132,6 +144,7 @@ func NewYamlBuilder(filepath string) (*Builder, error) {
 		RefreshTTL: time.Duration(yamlConfig.TTL.Refresh) * time.Minute,
 		SessionTTL: time.Duration(yamlConfig.TTL.Session) * time.Minute,
 		CodeTTL:    time.Duration(yamlConfig.TTL.Code) * time.Minute,
+		CSRFTTL:    time.Duration(yamlConfig.TTL.CSRF) * time.Minute,
 
 		Clients: clients,
 		Users:   users,

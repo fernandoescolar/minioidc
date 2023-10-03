@@ -5,7 +5,9 @@ import (
 	"encoding/base64"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/fernandoescolar/minioidc/internal/api/utils"
 	"github.com/fernandoescolar/minioidc/pkg/cryptography"
@@ -16,6 +18,7 @@ type CSRF struct {
 	active       bool
 	securecookie bool
 	masterKey    string
+	ttl          time.Duration
 }
 
 var _ domain.Middleware = (*CSRF)(nil)
@@ -25,6 +28,7 @@ func NewCSRF(config *domain.Config) *CSRF {
 		active:       true,
 		securecookie: config.UseSecureCookie,
 		masterKey:    config.MasterKey,
+		ttl:          config.CSRFTTL,
 	}
 }
 
@@ -119,7 +123,8 @@ func (m *CSRF) formHTTP(w http.ResponseWriter, r *http.Request) *http.Request {
 }
 
 func (m *CSRF) generateCSRFToken(csrfCookie string) (string, error) {
-	csrfToken, err := cryptography.Encrypts(m.masterKey, csrfCookie)
+	csrfToken := fmt.Sprintf("%s:%d", csrfCookie, time.Now().Unix())
+	csrfToken, err := cryptography.Encrypts(m.masterKey, csrfToken)
 	if err != nil {
 		return "", fmt.Errorf("Cannot encryp CSRF token: %w", err)
 	}
@@ -133,7 +138,28 @@ func (m *CSRF) validateCSRFToken(csrfCookie string, csrfToken string) bool {
 		return false
 	}
 
-	return csrfCookie == v
+	split := strings.Split(v, ":")
+	if len(split) != 2 {
+		return false
+	}
+
+	token := split[0]
+	unixtime := split[1]
+	if unixtime == "" {
+		return false
+	}
+
+	i, err := strconv.ParseInt(unixtime, 10, 64)
+	if err != nil {
+		return false
+	}
+
+	t := time.Unix(i, 0)
+	if time.Now().Sub(t) > m.ttl {
+		return false
+	}
+
+	return csrfCookie == token
 }
 
 func generateCSRFCookieValue() (string, error) {

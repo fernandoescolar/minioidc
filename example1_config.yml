@@ -1,5 +1,5 @@
 name: My MiniOIDC
-masterkey: 12345678901234567890123456789012
+masterkey: ${MINIOIDC_MASTER_KEY}
 issuer: http://localhost:8000/
 audience: http://localhost:8000/
 require_mfa: true

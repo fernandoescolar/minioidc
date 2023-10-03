@@ -12,7 +12,8 @@
             "program": "cmd/minioidc/main.go",
             "cwd": "${workspaceFolder}",
             "env": {
-                "MINIOIDC_CONFIG": "example1_config.yml"
+                "MINIOIDC_CONFIG": "example1_config.yml",
+                "MINIOIDC_MASTER_KEY": "12345678901234567890123456789012"
             },
         }
     ]

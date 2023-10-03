@@ -42,6 +42,8 @@ type Config struct {
 	SessionTTL time.Duration
 	// is the time to live of authorization codes.
 	CodeTTL time.Duration
+	// is the time to live of CSRF tokens.
+	CSRFTTL time.Duration
 
 	// is the store used to save clients.
 	ClientStore ClientStore

@@ -30,8 +30,15 @@ type Builder struct {
 	Issuer                string
 	Audience              string
 	RequireMFA            bool
+	ReuseRefreshTokens    bool
 	PrivateRSAKeyFilepath string
 	PrivateRSAKey         *rsa.PrivateKey
+
+	UseHSTS             bool
+	UseCSP              bool
+	UseSecureCookie     bool
+	UseForwardedHeaders bool
+	LogRequests         bool
 
 	AccessTTL  time.Duration
 	RefreshTTL time.Duration
@@ -191,11 +198,18 @@ func (b *Builder) assignDefaults() error {
 
 func (b *Builder) config() (*domain.Config, error) {
 	config := &domain.Config{
-		Name:       b.Name,
-		MasterKey:  b.MasterKey,
-		Issuer:     b.Issuer,
-		Audience:   b.Audience,
-		RequireMFA: b.RequireMFA,
+		Name:               b.Name,
+		MasterKey:          b.MasterKey,
+		Issuer:             b.Issuer,
+		Audience:           b.Audience,
+		RequireMFA:         b.RequireMFA,
+		ReuseRefreshTokens: b.ReuseRefreshTokens,
+
+		UseHSTS:             b.UseHSTS,
+		UseCSP:              b.UseCSP,
+		UseSecureCookie:     b.UseSecureCookie,
+		UseForwardedHeaders: b.UseForwardedHeaders,
+		LogRequests:         b.LogRequests,
 
 		AccessTTL:  b.AccessTTL,
 		RefreshTTL: b.RefreshTTL,

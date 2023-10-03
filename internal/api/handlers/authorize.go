@@ -3,12 +3,14 @@ package handlers
 import (
 	"crypto/subtle"
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
 	"github.com/fernandoescolar/minioidc/internal/api/utils"
+	"github.com/fernandoescolar/minioidc/internal/stores"
 	"github.com/fernandoescolar/minioidc/pkg/cryptography"
 	"github.com/fernandoescolar/minioidc/pkg/domain"
 )
@@ -58,7 +60,8 @@ func (h *AuthorizeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	validRedirectURI := client.RedirectURLIsValid(r.URL.Query().Get("redirect_uri"))
+	redirectURI := r.URL.Query().Get("redirect_uri")
+	validRedirectURI := client.RedirectURLIsValid(redirectURI)
 	if !validRedirectURI {
 		utils.Error(w, utils.InvalidRequest, "Invalid redirect uri", http.StatusBadRequest)
 		return
@@ -80,7 +83,17 @@ func (h *AuthorizeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	grant, err := h.grantStore.NewCodeGrant(
+	id := stores.CreateComplexUID()
+	hid := cryptography.SHA256(id)
+	eid, err := cryptography.Encrypts(h.masterKey, id)
+	if err != nil {
+		log.Println("Error: creating code id: %w", err)
+		utils.InternalServerError(w, err.Error())
+		return
+	}
+
+	_, err = h.grantStore.NewCodeGrant(
+		hid,
 		client,
 		session,
 		h.now().Add(h.codeTTL),
@@ -94,16 +107,18 @@ func (h *AuthorizeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	redirectURI, err := url.Parse(r.URL.Query().Get("redirect_uri"))
+	ru, err := url.Parse(redirectURI)
 	if err != nil {
 		utils.InternalServerError(w, err.Error())
 		return
 	}
-	params, _ := url.ParseQuery(redirectURI.RawQuery)
-	params.Set("code", grant.ID())
+
+	params, _ := url.ParseQuery(ru.RawQuery)
+	params.Set("code", eid)
 	params.Set("state", r.URL.Query().Get("state"))
-	redirectURI.RawQuery = params.Encode()
-	http.Redirect(w, r, redirectURI.String(), http.StatusFound)
+	ru.RawQuery = params.Encode()
+
+	http.Redirect(w, r, ru.String(), http.StatusFound)
 }
 
 func (h *AuthorizeHandler) getAuthenticatedUserFromCookies(r *http.Request) domain.Session {
@@ -117,7 +132,7 @@ func (h *AuthorizeHandler) getAuthenticatedUserFromCookies(r *http.Request) doma
 		return nil
 	}
 
-	sessionID, err := cryptography.Decrypts(encryptedSessionID, h.masterKey)
+	sessionID, err := cryptography.Decrypts(h.masterKey, encryptedSessionID)
 	if sessionID == "" || err != nil {
 		return nil
 	}
@@ -136,14 +151,21 @@ func validateScope(w http.ResponseWriter, r *http.Request) bool {
 		allowed[scope] = struct{}{}
 	}
 
-	scopes := strings.Split(r.URL.Query().Get("scope"), " ")
+	// FIX: The resource Get allocated is prone to resource exhaustion when used by another func
+	scope := r.URL.Query().Get("scope")
+	if len(scope) > 200 {
+		utils.Error(w, utils.InvalidScope, "Invalid scope", http.StatusBadRequest)
+		return false
+	}
+
+	scopes := strings.Split(scope, " ")
 	for _, scope := range scopes {
 		if _, ok := allowed[scope]; !ok {
-			utils.Error(w, utils.InvalidScope, fmt.Sprintf("Unsupported scope: %s", scope),
-				http.StatusBadRequest)
+			utils.Error(w, utils.InvalidScope, fmt.Sprintf("Unsupported scope: %s", scope), http.StatusBadRequest)
 			return false
 		}
 	}
+
 	return true
 }
 

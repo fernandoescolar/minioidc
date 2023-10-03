@@ -60,7 +60,7 @@ Cookie: {{cookies}}
 
 grant_type=authorization_code
 &redirect_uri={{redirect_uri}}
-&code=72bef1a4855842928383ca6cb1725e8b590291448ded4c99a2dcc37ee51efd13
+&code=k6wWfV1EHuPZdlsgye2gQWBAr%2FD0pNBsxrR0wV%2FJ65DLfZ2UbR7aAkb4g35xHJRg3qOw%2FrOAObH0kiSNc3wyiE4HbDrzs5ud6I6resM4VL9E4hiSKQgp%2F42zAOzQdE%2FUxf2OwRfAAkA%3D
 &code_verifier={{code_verifier}}
 
 ###
@@ -78,3 +78,13 @@ grant_type=refresh_token
 &refresh_token={{refresh_token}}
 
 ###
+
+POST /connect/token HTTP/1.1
+Host: localhost:8000
+Accept: application/json
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=refresh_token
+&client_id=myclient
+&client_secret=secret
+&refresh_token=HIMCKI%2FpFrNO6hkpxU%2BWWIP1g3md3KrvolPKGZCq%2BO%2FThq1dTjEsvmWhAjmhboUJhgmwXpV4VtR2UPAiVVzYZuIcCavy4UYkmGnfS0YgFUzsGHYVag170m%2Bki2rZnrSWR7x6tZpJYJ8%3D

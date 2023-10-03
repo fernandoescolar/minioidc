@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/fernandoescolar/minioidc/internal/api/utils"
+	"github.com/fernandoescolar/minioidc/internal/stores"
 	"github.com/fernandoescolar/minioidc/pkg/cryptography"
 	"github.com/fernandoescolar/minioidc/pkg/domain"
 )
@@ -19,14 +20,16 @@ const (
 )
 
 type TokenHandler struct {
-	now         func() time.Time
-	issuer      string
-	audience    string
-	keypair     *cryptography.Keypair
-	accessTTL   time.Duration
-	refreshTTL  time.Duration
-	clientStore domain.ClientStore
-	grantStore  domain.GrantStore
+	now                func() time.Time
+	issuer             string
+	audience           string
+	masterKey          string
+	reUseRefreshTokens bool
+	keypair            *cryptography.Keypair
+	accessTTL          time.Duration
+	refreshTTL         time.Duration
+	clientStore        domain.ClientStore
+	grantStore         domain.GrantStore
 }
 
 type tokenResponse struct {
@@ -41,14 +44,16 @@ var _ http.Handler = (*TokenHandler)(nil)
 
 func NewTokenHandler(config *domain.Config, now func() time.Time) *TokenHandler {
 	return &TokenHandler{
-		now:         now,
-		issuer:      config.Issuer,
-		audience:    config.Audience,
-		keypair:     config.Keypair,
-		accessTTL:   config.AccessTTL,
-		refreshTTL:  config.RefreshTTL,
-		clientStore: config.ClientStore,
-		grantStore:  config.GrantStore,
+		now:                now,
+		issuer:             config.Issuer,
+		audience:           config.Audience,
+		masterKey:          config.MasterKey,
+		reUseRefreshTokens: config.ReuseRefreshTokens,
+		keypair:            config.Keypair,
+		accessTTL:          config.AccessTTL,
+		refreshTTL:         config.RefreshTTL,
+		clientStore:        config.ClientStore,
+		grantStore:         config.GrantStore,
 	}
 }
 
@@ -96,6 +101,7 @@ func (h *TokenHandler) requestWithCode(w http.ResponseWriter, r *http.Request) b
 
 	tokens.AccessToken, err = grant.AccessToken(h.issuer, h.audience, h.accessTTL, h.keypair, h.now())
 	if err != nil {
+		log.Println("Error: creating access token: %w", err)
 		utils.InternalServerError(w, err.Error())
 		return false
 	}
@@ -103,23 +109,24 @@ func (h *TokenHandler) requestWithCode(w http.ResponseWriter, r *http.Request) b
 	if len(grant.Scopes()) > 0 && grant.Scopes()[0] == openidScope {
 		tokens.IDToken, err = grant.IDToken(h.issuer, h.audience, h.refreshTTL, h.keypair, h.now())
 		if err != nil {
+			log.Println("Error: creating id token: %w", err)
 			utils.InternalServerError(w, err.Error())
 			return false
 		}
 	}
 
 	if containsOfflineAccess(grant.Scopes()) {
-		refreshGrant, err := h.grantStore.NewRefreshTokenGrant(grant.Client(), grant.Session(), h.now().Add(h.refreshTTL), grant.Scopes())
-		if err != nil {
-			utils.InternalServerError(w, err.Error())
+		id, success := h.createRefreshToken(w, grant)
+		if !success {
 			return false
 		}
 
-		tokens.RefreshToken = refreshGrant.ID()
+		tokens.RefreshToken = id
 	}
 
 	resp, err := json.Marshal(tokens)
 	if err != nil {
+		log.Println("Error: marshaling tokens: %w", err)
 		utils.InternalServerError(w, err.Error())
 		return false
 	}
@@ -137,10 +144,23 @@ func (h *TokenHandler) requestWithRefresh(w http.ResponseWriter, r *http.Request
 	}
 
 	tokens := &tokenResponse{
-		TokenType:    "bearer",
-		ExpiresIn:    h.accessTTL,
-		RefreshToken: grant.ID(),
+		TokenType: "bearer",
+		ExpiresIn: h.accessTTL,
 	}
+
+	if h.reUseRefreshTokens {
+		tokens.RefreshToken = r.Form.Get("refresh_token")
+	} else {
+		id, success := h.createRefreshToken(w, grant)
+		if !success {
+			log.Println("Error creating new refresh token")
+			utils.InternalServerError(w, "Error creating new refresh token")
+			return false
+		}
+
+		tokens.RefreshToken = id
+	}
+
 	var err error
 
 	tokens.AccessToken, err = grant.AccessToken(h.issuer, h.audience, h.accessTTL, h.keypair, h.now())
@@ -179,6 +199,14 @@ func (h *TokenHandler) validateCodeGrant(w http.ResponseWriter, r *http.Request)
 	}
 
 	code := r.Form.Get("code")
+	code, err := cryptography.Decrypts(h.masterKey, code)
+	if err != nil {
+		log.Println("Error: getting code: %w", err)
+		utils.InternalServerError(w, err.Error())
+		return nil, false
+	}
+
+	code = cryptography.SHA256(code)
 	grant, err := h.grantStore.GetGrantByIDAndType(code, domain.GrantTypeCode)
 	if err != nil || grant.HasBeenGranted() {
 		utils.Error(w, utils.InvalidGrant, fmt.Sprintf("Invalid code: %s", code), http.StatusUnauthorized)
@@ -250,11 +278,23 @@ func (h *TokenHandler) validateRefreshGrant(w http.ResponseWriter, r *http.Reque
 	// }
 
 	refreshToken := r.Form.Get("refresh_token")
-	grant, err := h.grantStore.GetGrantByIDAndType(refreshToken, domain.GrantTypeRefresh)
+	dr, err := cryptography.Decrypts(h.masterKey, refreshToken)
+	if err != nil {
+		log.Println("Error: getting refresh token: %w", err)
+		utils.InternalServerError(w, err.Error())
+		return nil, false
+	}
+
+	hr := cryptography.SHA256(dr)
+	grant, err := h.grantStore.GetGrantByIDAndType(hr, domain.GrantTypeRefresh)
 	if err != nil {
 		utils.Error(w, utils.InvalidGrant, "Invalid refresh token",
 			http.StatusUnauthorized)
 		return nil, false
+	}
+
+	if !h.reUseRefreshTokens {
+		h.grantStore.Grant(grant.ID())
 	}
 
 	return grant, true
@@ -294,4 +334,24 @@ func containsOfflineAccess(scopes []string) bool {
 	}
 
 	return false
+}
+
+func (h *TokenHandler) createRefreshToken(w http.ResponseWriter, grant domain.Grant) (string, bool) {
+	id := stores.CreateComplexUID()
+	hid := cryptography.SHA256(id)
+	eid, err := cryptography.Encrypts(h.masterKey, id)
+	if err != nil {
+		log.Println("Error: creating refresh token id: %w", err)
+		utils.InternalServerError(w, err.Error())
+		return "", false
+	}
+
+	_, err = h.grantStore.NewRefreshTokenGrant(hid, grant.Client(), grant.Session(), h.now().Add(h.refreshTTL), grant.Scopes())
+	if err != nil {
+		log.Println("Error: creating refresh token: %w", err)
+		utils.InternalServerError(w, err.Error())
+		return "", false
+	}
+
+	return eid, true
 }

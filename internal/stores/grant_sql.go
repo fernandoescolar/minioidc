@@ -10,7 +10,6 @@ import (
 
 	"github.com/fernandoescolar/minioidc/pkg/domain"
 	"github.com/golang-jwt/jwt"
-	"github.com/google/uuid"
 )
 
 type sqlGrantStore struct {
@@ -29,10 +28,10 @@ func NewSqliteGrantStore(db *sql.DB, clientStore domain.ClientStore, sessionStor
 }
 
 // NewCodeGrant creates a new Grant for a User
-func (gs *sqlGrantStore) NewCodeGrant(client domain.Client, session domain.Session, expiresAt time.Time, scopes []string, nonce string, codeChallenge, codeChallengeMethod string) (domain.Grant, error) {
+func (gs *sqlGrantStore) NewCodeGrant(id string, client domain.Client, session domain.Session, expiresAt time.Time, scopes []string, nonce string, codeChallenge, codeChallengeMethod string) (domain.Grant, error) {
 	scopesStr := strings.Join(scopes, " ")
 	grant := &miniGrant{
-		id:                  gs.createNewGrantID(),
+		id:                  id,
 		grantType:           domain.GrantTypeCode,
 		clientID:            client.ClientID(),
 		sessionID:           session.ID(),
@@ -53,10 +52,10 @@ func (gs *sqlGrantStore) NewCodeGrant(client domain.Client, session domain.Sessi
 }
 
 // NewRefreshTokenGrant creates a new Grant for a User
-func (gs *sqlGrantStore) NewRefreshTokenGrant(client domain.Client, session domain.Session, expiresAt time.Time, scopes []string) (domain.Grant, error) {
+func (gs *sqlGrantStore) NewRefreshTokenGrant(id string, client domain.Client, session domain.Session, expiresAt time.Time, scopes []string) (domain.Grant, error) {
 	scopesStr := strings.Join(scopes, " ")
 	grant := &miniGrant{
-		id:        gs.createNewGrantID(),
+		id:        id,
 		grantType: domain.GrantTypeRefresh,
 		clientID:  client.ClientID(),
 		sessionID: session.ID(),
@@ -134,9 +133,4 @@ func (gs *sqlGrantStore) ToGrant(grant *miniGrant) (domain.Grant, error) {
 
 	scopes := strings.Split(grant.scopes, " ")
 	return domain.NewGrant(grant.id, grant.grantType, client, session, grant.expiresAt, scopes, grant.nonce, grant.codeChallenge, grant.codeChallengeMethod), nil
-}
-
-func (gs *sqlGrantStore) createNewGrantID() string {
-	id := uuid.New().String() + uuid.New().String()
-	return strings.ReplaceAll(id, "-", "")
 }

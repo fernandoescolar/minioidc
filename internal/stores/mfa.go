@@ -4,7 +4,6 @@ import (
 	"sync"
 
 	"github.com/fernandoescolar/minioidc/pkg/domain"
-	"github.com/google/uuid"
 )
 
 // MFACodeStore manages our MFACode objects
@@ -28,9 +27,9 @@ func NewMFACodeStore(userStore domain.UserStore) domain.MFACodeStore {
 }
 
 // NewMFACode creates a new MFACode for a User
-func (ms *miniMFACodeStore) NewMFACode(user domain.User, secret, method string) (domain.MFACode, error) {
+func (ms *miniMFACodeStore) NewMFACode(id string, user domain.User, secret, method string) (domain.MFACode, error) {
 	mfaCode := &miniMFACode{
-		id:     uuid.New().String(),
+		id:     id,
 		userID: user.ID(),
 		secret: secret,
 		method: method,

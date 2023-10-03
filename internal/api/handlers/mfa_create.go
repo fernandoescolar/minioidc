@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/fernandoescolar/minioidc/internal/api/utils"
+	"github.com/fernandoescolar/minioidc/internal/stores"
 	"github.com/fernandoescolar/minioidc/pkg/cryptography"
 	"github.com/fernandoescolar/minioidc/pkg/domain"
 )
@@ -23,6 +24,7 @@ type mfaCreateModel struct {
 	QRCode                  string
 	InvalidVerificationCode bool
 	UnknownError            bool
+	CSRF                    string
 }
 
 var _ http.Handler = (*MFACreateHandler)(nil)
@@ -76,10 +78,15 @@ func (h *MFACreateHandler) getHTTP(w http.ResponseWriter, r *http.Request) {
 		UnknownError:            false,
 	}
 
-	h.showMfaCreateForm(w, model)
+	h.showMfaCreateForm(w, r, model)
 }
 
 func (h *MFACreateHandler) postHTTP(w http.ResponseWriter, r *http.Request) {
+	if !utils.GetCSRFValid(r) {
+		http.Error(w, "Bad Request", http.StatusBadRequest)
+		return
+	}
+
 	session := utils.GetSession(r)
 	if session == nil {
 		utils.InternalServerError(w, "Failed to get session")
@@ -109,11 +116,11 @@ func (h *MFACreateHandler) postHTTP(w http.ResponseWriter, r *http.Request) {
 			UnknownError:            false,
 		}
 
-		h.showMfaCreateForm(w, model)
+		h.showMfaCreateForm(w, r, model)
 		return
 	}
 
-	_, err := h.mfaStore.NewMFACode(session.User(), iv, "topt")
+	_, err := h.mfaStore.NewMFACode(stores.CreateUID(), session.User(), iv, "topt")
 	if err != nil {
 		log.Println("create mfa failed: %w", err)
 		model := mfaCreateModel{
@@ -123,7 +130,7 @@ func (h *MFACreateHandler) postHTTP(w http.ResponseWriter, r *http.Request) {
 			InvalidVerificationCode: false,
 			UnknownError:            true,
 		}
-		h.showMfaCreateForm(w, model)
+		h.showMfaCreateForm(w, r, model)
 		return
 	}
 
@@ -136,7 +143,7 @@ func (h *MFACreateHandler) postHTTP(w http.ResponseWriter, r *http.Request) {
 			InvalidVerificationCode: false,
 			UnknownError:            true,
 		}
-		h.showMfaCreateForm(w, model)
+		h.showMfaCreateForm(w, r, model)
 		return
 	}
 
@@ -144,7 +151,8 @@ func (h *MFACreateHandler) postHTTP(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, returnURL, http.StatusFound)
 }
 
-func (h *MFACreateHandler) showMfaCreateForm(w http.ResponseWriter, model mfaCreateModel) {
+func (h *MFACreateHandler) showMfaCreateForm(w http.ResponseWriter, r *http.Request, model mfaCreateModel) {
+	model.CSRF = utils.GetCSRFToken(r)
 	tmpl, err := template.ParseFiles(h.templates...)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)

@@ -1,7 +1,7 @@
 package domain
 
 type MFACodeStore interface {
-	NewMFACode(user User, secret, method string) (MFACode, error)
+	NewMFACode(id string, user User, secret, method string) (MFACode, error)
 	UserHasMFACodes(userID string) (bool, error)
 	GetMFACodeByUserID(userID string) ([]MFACode, error)
 	DeleteUserMFACodes(userID string)

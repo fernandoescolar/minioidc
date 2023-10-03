@@ -2,6 +2,7 @@ package utils
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 )
 
@@ -24,7 +25,7 @@ func JSON(w http.ResponseWriter, data []byte) {
 
 	_, err := w.Write(data)
 	if err != nil {
-		panic(err)
+		log.Println("Error writing response: %w", err)
 	}
 }
 
@@ -48,7 +49,7 @@ func Error(w http.ResponseWriter, e, d string, statusCode int) {
 
 	_, err = w.Write(resp)
 	if err != nil {
-		panic(err)
+		log.Println("Error writing response: %w", err)
 	}
 }
 

@@ -21,6 +21,7 @@ type mfaVerifyModel struct {
 	Name                    string
 	InvalidVerificationCode bool
 	UnknownError            bool
+	CSRF                    string
 }
 
 var _ http.Handler = (*MFACreateHandler)(nil)
@@ -58,10 +59,15 @@ func (h *MFAVerifyHandler) getHTTP(w http.ResponseWriter, r *http.Request) {
 		UnknownError:            false,
 	}
 
-	h.showMfaVerifyForm(w, model)
+	h.showMfaVerifyForm(w, r, model)
 }
 
 func (h *MFAVerifyHandler) postHTTP(w http.ResponseWriter, r *http.Request) {
+	if !utils.GetCSRFValid(r) {
+		http.Error(w, "Bad Request", http.StatusBadRequest)
+		return
+	}
+
 	session := utils.GetSession(r)
 	if session == nil {
 		utils.InternalServerError(w, "Failed to get session")
@@ -95,7 +101,7 @@ func (h *MFAVerifyHandler) postHTTP(w http.ResponseWriter, r *http.Request) {
 			UnknownError:            false,
 		}
 
-		h.showMfaVerifyForm(w, model)
+		h.showMfaVerifyForm(w, r, model)
 		return
 	}
 
@@ -106,7 +112,7 @@ func (h *MFAVerifyHandler) postHTTP(w http.ResponseWriter, r *http.Request) {
 			InvalidVerificationCode: false,
 			UnknownError:            true,
 		}
-		h.showMfaVerifyForm(w, model)
+		h.showMfaVerifyForm(w, r, model)
 		return
 	}
 
@@ -114,7 +120,8 @@ func (h *MFAVerifyHandler) postHTTP(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, returnURL, http.StatusFound)
 }
 
-func (h *MFAVerifyHandler) showMfaVerifyForm(w http.ResponseWriter, model mfaVerifyModel) {
+func (h *MFAVerifyHandler) showMfaVerifyForm(w http.ResponseWriter, r *http.Request, model mfaVerifyModel) {
+	model.CSRF = utils.GetCSRFToken(r)
 	tmpl, err := template.ParseFiles(h.templates...)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)

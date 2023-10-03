@@ -68,7 +68,14 @@ masterkey: 12345678901234567890123456789012
 issuer: http://example.com
 audience: http://example.com
 require_mfa: true
+reuse_refresh_tokens: false
 private_rsa_key_path: private_key.pem
+middlewares:
+  hsts: true
+  csp: true
+  secure_cookies: true
+  forward_headers: true
+  log_requests: true
 ttl:
   access: 20 # minutes
   refresh: 129600 # 90 days
@@ -106,7 +113,16 @@ In the root section, you can configure the following settings:
 - `issuer` - The OIDC issuer
 - `audience` - The OIDC audience
 - `require_mfa` - Whether to require MFA for all users (default: `false`)
+- `reuse_refresh_tokens` - Whether to allow re-use refresh tokens (default: `false`)
 - `private_rsa_key_path` - The path to the private RSA key (if not set, a new random key will be generated)
+
+In the `middlewares` section, you can activate the following middlewares:
+
+- `hsts` - Whether to enable HTTP Strict Transport Security (HSTS) (default: `false`)
+- `csp` - Whether to enable Content Security Policy (CSP) (default: `false`)
+- `secure_cookies` - Whether to enable secure cookies (default: `false`)
+- `forward_headers` - Whether to forward headers (default: `false`)
+- `log_requests` - Whether to log requests (default: `false`)
 
 In the `ttl` section, you can configure the following TTLs:
 

@@ -18,8 +18,21 @@ type Config struct {
 	Audience string
 	// if true, the server will require MFA for all users.
 	RequireMFA bool
+	// if true, allows re-use refresh tokens in different request
+	ReuseRefreshTokens bool
 	// is the path to the private RSA key used to sign JWTs.
 	Keypair *cryptography.Keypair
+
+	// if true, the server will use HSTS.
+	UseHSTS bool
+	// if true, the server will use CSP.
+	UseCSP bool
+	// if true, the server will use secure cookies.
+	UseSecureCookie bool
+	// if true, the server will use forwarded headers.
+	UseForwardedHeaders bool
+	// if true, the server will log when a request starts and ends.
+	LogRequests bool
 
 	// is the time to live of access tokens.
 	AccessTTL time.Duration

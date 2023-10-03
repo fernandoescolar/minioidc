@@ -4,7 +4,6 @@ import (
 	"database/sql"
 
 	"github.com/fernandoescolar/minioidc/pkg/domain"
-	"github.com/google/uuid"
 )
 
 // MFACodeStore manages our MFACode objects
@@ -22,9 +21,9 @@ func NewSqliteMFACodeStore(db *sql.DB, userStore domain.UserStore) domain.MFACod
 }
 
 // NewMFACode creates a new MFACode for a User
-func (ms *sqlMFACodeStore) NewMFACode(user domain.User, secret, method string) (domain.MFACode, error) {
+func (ms *sqlMFACodeStore) NewMFACode(id string, user domain.User, secret, method string) (domain.MFACode, error) {
 	mfaCode := &miniMFACode{
-		id:     uuid.New().String(),
+		id:     id,
 		userID: user.ID(),
 		secret: secret,
 		method: method,

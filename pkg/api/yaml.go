@@ -12,10 +12,19 @@ type YamlConfig struct {
 	Name      string `yaml:"name"`
 	MasterKey string `yaml:"masterkey"`
 
-	Issuer            string `yaml:"issuer"`
-	Audience          string `yaml:"audience"`
-	RequireMFA        bool   `yaml:"require_mfa"`
-	PrivateRSAKeyPath string `yaml:"private_rsa_key_path"`
+	Issuer             string `yaml:"issuer"`
+	Audience           string `yaml:"audience"`
+	RequireMFA         bool   `yaml:"require_mfa"`
+	ReuseRefreshTokens bool   `yaml:"reuse_refresh_tokens"`
+	PrivateRSAKeyPath  string `yaml:"private_rsa_key_path"`
+
+	Middlewares struct {
+		HSTS           bool `yaml:"hsts"`
+		CSP            bool `yaml:"csp"`
+		SecureCookies  bool `yaml:"secure_cookies"`
+		ForwardHeaders bool `yaml:"forward_headers"`
+		LogRequests    bool `yaml:"log_requests"`
+	} `yaml:"middlewares"`
 
 	TTL struct {
 		Access  int `yaml:"access"`
@@ -105,7 +114,14 @@ func NewYamlBuilder(filepath string) (*Builder, error) {
 		Issuer:                yamlConfig.Issuer,
 		Audience:              yamlConfig.Audience,
 		RequireMFA:            yamlConfig.RequireMFA,
+		ReuseRefreshTokens:    yamlConfig.ReuseRefreshTokens,
 		PrivateRSAKeyFilepath: yamlConfig.PrivateRSAKeyPath,
+
+		UseHSTS:             yamlConfig.Middlewares.HSTS,
+		UseCSP:              yamlConfig.Middlewares.CSP,
+		UseSecureCookie:     yamlConfig.Middlewares.SecureCookies,
+		UseForwardedHeaders: yamlConfig.Middlewares.ForwardHeaders,
+		LogRequests:         yamlConfig.Middlewares.LogRequests,
 
 		BaseTemplateFilepath:      yamlConfig.Templates.Base,
 		LoginTemplateFilepath:     yamlConfig.Templates.Login,

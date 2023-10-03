@@ -8,8 +8,8 @@ import (
 )
 
 type GrantStore interface {
-	NewCodeGrant(client Client, session Session, expiresAt time.Time, scopes []string, nonce string, codeChallenge, codeChallengeMethod string) (Grant, error)
-	NewRefreshTokenGrant(client Client, session Session, expiresAt time.Time, scopes []string) (Grant, error)
+	NewCodeGrant(id string, client Client, session Session, expiresAt time.Time, scopes []string, nonce string, codeChallenge, codeChallengeMethod string) (Grant, error)
+	NewRefreshTokenGrant(id string, client Client, session Session, expiresAt time.Time, scopes []string) (Grant, error)
 	GetGrantByToken(token *jwt.Token) (Grant, error)
 	GetGrantByIDAndType(id string, grantType GrantType) (Grant, error)
 	Grant(id string) error

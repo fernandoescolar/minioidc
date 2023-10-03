@@ -12,7 +12,8 @@
     </p>
     <p>Verify the code your auth app is showing:</p>
     <div class="otp-wrapper">
-        <input type="text"
+        <input
+            type="text"
             autocomplete="one-time-code"
             inputmode="numeric"
             maxlength="6"
@@ -22,7 +23,7 @@
         <button id="verify" type="submit">Verify</button>
     </div>
     <input type="hidden" name="verification_iv" value="{{.IV}}" />
-
+    <input type="hidden" name="__csrf" value="{{ .CSRF }}">
 </form>
 <script src="/static/qrcode.min.js"></script>
 <script>

@@ -18,15 +18,19 @@ const (
 	UserinfoEndpoint      = OAuthEndpoint + "userinfo"
 	JWKSEndpoint          = WellKnownEndpoint + "jwks.json"
 	DiscoveryEndpoint     = WellKnownEndpoint + "openid-configuration"
-	MFAEnpoint            = "/mfa"
-	MFACreateEndpoint     = MFAEnpoint + "/create"
-	MFAVerifyEndpoint     = MFAEnpoint + "/verify"
+	MFAEnpoint            = "/mfa/"
+	MFACreateEndpoint     = MFAEnpoint + "create"
+	MFAVerifyEndpoint     = MFAEnpoint + "verify"
 	LoginEndpoint         = "/login"
 	StaticEndpoint        = "/static/"
 )
 
 func CreateMinioidcRoutes(mux *http.ServeMux, config *domain.Config, now func() time.Time) http.Handler {
-	loggerMiddleware := middlewares.NewLogger()
+	loggerMiddleware := middlewares.NewLogger(config)
+	forwardedHeaders := middlewares.NewForwardedHeaders(config)
+	hstsMiddleware := middlewares.NewHSTS(config)
+	cspMiddleware := middlewares.NewCSP(config)
+	csrfMiddleware := middlewares.NewCSRF(config)
 	sessionMiddleware := middlewares.NewSessionAuthorized(config, now, LoginEndpoint, []string{WellKnownEndpoint, TokenEndpoint, UserinfoEndpoint, StaticEndpoint, LoginEndpoint})
 	sessionMFARequired := middlewares.NewSessionMFARequired(config, MFACreateEndpoint, MFAVerifyEndpoint)
 	updateSessionTTL := middlewares.NewUpdateSessionTTL(config, now)
@@ -52,7 +56,15 @@ func CreateMinioidcRoutes(mux *http.ServeMux, config *domain.Config, now func() 
 	mux.Handle(IssuerBase, welcomeHandler)
 	mux.Handle(StaticEndpoint, http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
 
-	return createMiddlewareChain(mux, loggerMiddleware, sessionMiddleware, sessionMFARequired, updateSessionTTL)
+	return createMiddlewareChain(mux,
+		loggerMiddleware,
+		forwardedHeaders,
+		hstsMiddleware,
+		cspMiddleware,
+		csrfMiddleware,
+		sessionMiddleware,
+		sessionMFARequired,
+		updateSessionTTL)
 }
 
 func createMiddlewareChain(mux *http.ServeMux, middlewares ...domain.Middleware) http.Handler {

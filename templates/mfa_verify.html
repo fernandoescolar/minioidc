@@ -9,14 +9,15 @@
         {{ end }}
     </p>
     <div class="otp-wrapper">
-        <input type="text"
+        <input
+            type="text"
             autocomplete="one-time-code"
             inputmode="numeric"
             maxlength="6"
             pattern="\d{6}"
             name="verification_code" />
-
         <button id="verify" type="submit">Verify</button>
     </div>
+    <input type="hidden" name="__csrf" value="{{ .CSRF }}">
 </form>
 {{end}}

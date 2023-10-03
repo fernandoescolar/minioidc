@@ -18,7 +18,7 @@ The following features are planned for future releases:
 - [x] OIDC Discovery
 - [x] Authorization Code with PKCE
 - [x] Refresh Token
-- [ ] CSRF 
+- [x] CSRF
 - [x] Yaml config file
 - [ ] ENV secrets inside yaml config file
 - [x] Sqlite database for grants and sessions (and also for MFA)

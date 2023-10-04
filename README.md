@@ -10,6 +10,9 @@ minioidc is a lightweight OpenID Connect (OIDC) server designed to provide Singl
 - **Simple and Lightweight**: minioidc is designed to be a straightforward solution for enabling SSO in small or home networks.
 - **Client and User Configuration**: Easily configure client and user data directly in the YAML configuration file.
 - **Flexible Data Storage**: Store grant and session data in memory or use a SQLite v3 database for more persistent storage.
+- **LDAP Users Integration**: Use LDAP users to login.
+- **MFA**: Require MFA for all users using TOTP App (e.g. Google Authenticator).
+- **Secure by Default**: Enable HTTP Strict Transport Security (HSTS), Content Security Policy (CSP), secure cookies, and more with a single configuration option.
 
 ## Roadmap
 
@@ -23,7 +26,7 @@ The following features are planned for future releases:
 - [x] ENV secrets inside yaml config file
 - [x] Sqlite database for grants and sessions (and also for MFA)
 - [x] MFA with TOTP App (e.g. Google Authenticator)
-- [ ] MFA with email
+- [ ] MFA with email?
 - [x] Ldap Users integration
 
 ## Getting Started
@@ -193,6 +196,13 @@ In the `users` section, you can create the users to login. Each user has the fol
 - `phone` - The user phone number
 - `address` - The user address
 - `groups` - The list of user groups
+
+The yaml configuration file can also reference environment variables. You can use the following syntax to use environment variables in your yaml configuration file:
+
+```yaml
+value1: ${ENV_VAR}
+value2: $OTHER_ENV_VAR
+```
 
 ## Use in your projects
 

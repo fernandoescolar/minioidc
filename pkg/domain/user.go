@@ -10,9 +10,7 @@ import (
 type UserStore interface {
 	NewUser(subject, email, preferredUsername, phone, address string, groups []string, passwordHash string) (User, error)
 	GetUserByID(id string) (User, error)
-	GetUserByToken(token string) (User, error)
-	GetUserByUsername(email string) (User, error)
-	DeleteUser(id string)
+	GetUserByUsernameAndPassword(username string, password string) (User, error)
 }
 
 type User interface {
@@ -44,7 +42,7 @@ type miniUserinfo struct {
 }
 
 // NewUser creates a new User
-func NewUser(subject, email, preferredUsername, phone, address string, groups []string, passwordHash string) (User, error) {
+func NewUser(subject, email, preferredUsername, phone, address string, groups []string, passwordHash string) User {
 	return &user{
 		Subject:           subject,
 		Email:             email,
@@ -53,7 +51,7 @@ func NewUser(subject, email, preferredUsername, phone, address string, groups []
 		Address:           address,
 		Groups:            groups,
 		PasswordHash:      passwordHash,
-	}, nil
+	}
 }
 
 func (u *user) ID() string {

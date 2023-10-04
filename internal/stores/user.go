@@ -6,7 +6,6 @@ import (
 	"sync"
 
 	"github.com/fernandoescolar/minioidc/pkg/domain"
-	"github.com/golang-jwt/jwt"
 )
 
 type miniUser struct {
@@ -41,7 +40,7 @@ func (us *miniUserStore) NewUser(subject, email, preferredUsername, phone, addre
 	}
 
 	us.Store(user.subject, user)
-	return user.User()
+	return user.User(), nil
 }
 
 // GetUserByID looks up the User
@@ -52,19 +51,7 @@ func (us *miniUserStore) GetUserByID(id string) (domain.User, error) {
 	}
 
 	user := v.(*miniUser)
-	return user.User()
-}
-
-// GetUserByToken decodes a token and looks up a User based on the
-// user ID claim.
-func (us *miniUserStore) GetUserByToken(token string) (domain.User, error) {
-	claims := &domain.IDTokenClaims{}
-	_, err := jwt.ParseWithClaims(token, claims, nil)
-	if err != nil {
-		return nil, fmt.Errorf("GetUserByToken: %w", err)
-	}
-
-	return us.GetUserByID(claims.Subject)
+	return user.User(), nil
 }
 
 // GetUserByUsername looks up a User by their username
@@ -81,7 +68,21 @@ func (us *miniUserStore) GetUserByUsername(username string) (domain.User, error)
 	})
 
 	if user != nil {
-		return user.User()
+		return user.User(), nil
+	}
+
+	return nil, errors.New("user not found")
+}
+
+// GetUserByUsernameAndPassword looks up a User by their username and password
+func (us *miniUserStore) GetUserByUsernameAndPassword(username string, password string) (domain.User, error) {
+	user, err := us.GetUserByUsername(username)
+	if err != nil {
+		return nil, fmt.Errorf("GetUserByUsernameAndPassword: %w", err)
+	}
+
+	if user.PasswordIsValid(password) {
+		return user, nil
 	}
 
 	return nil, errors.New("user not found")
@@ -92,11 +93,6 @@ func (us *miniUserStore) DeleteUser(id string) {
 	us.Delete(id)
 }
 
-func (u *miniUser) User() (domain.User, error) {
-	user, err := domain.NewUser(u.subject, u.email, u.preferredUsername, u.phone, u.address, u.groups, u.passwordHash)
-	if err != nil {
-		return nil, fmt.Errorf("toUser: %w", err)
-	}
-
-	return user, nil
+func (u *miniUser) User() domain.User {
+	return domain.NewUser(u.subject, u.email, u.preferredUsername, u.phone, u.address, u.groups, u.passwordHash)
 }

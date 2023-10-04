@@ -47,7 +47,20 @@ type YamlConfig struct {
 		UseInSessions bool   `yaml:"use_in_sessions"`
 		UseInMFA      bool   `yaml:"use_in_mfa"`
 	} `yaml:"sqlite"`
-
+	Ldap struct {
+		Server     string `yaml:"server"`
+		Bind       string `yaml:"bind"`
+		Password   string `yaml:"password"`
+		BaseDN     string `yaml:"base_dn"`
+		FilterDN   string `yaml:"filter_dn"`
+		Attributes struct {
+			Subject string `yaml:"subject"`
+			Name    string `yaml:"name"`
+			Email   string `yaml:"email"`
+			Phone   string `yaml:"phone"`
+			Address string `yaml:"address"`
+		} `yaml:"attributes"`
+	} `yaml:"ldap"`
 	Clients []struct {
 		ID           string   `yaml:"id"`
 		SecretHash   string   `yaml:"secret_hash"`
@@ -151,5 +164,20 @@ func NewYamlBuilder(filepath string) (*Builder, error) {
 	}
 
 	builder.UseSQLite(yamlConfig.Sqlite.Filepath, sqliteDatabases)
+	if yamlConfig.Ldap.Server != "" {
+		builder.UseLDAP(
+			yamlConfig.Ldap.Server,
+			LDAPConfig{
+				Bind:             yamlConfig.Ldap.Bind,
+				Password:         yamlConfig.Ldap.Password,
+				FilterDN:         yamlConfig.Ldap.FilterDN,
+				BaseDN:           yamlConfig.Ldap.BaseDN,
+				SubjectAttribute: yamlConfig.Ldap.Attributes.Subject,
+				NameAttribute:    yamlConfig.Ldap.Attributes.Name,
+				EmailAttribute:   yamlConfig.Ldap.Attributes.Email,
+				PhoneAttribute:   yamlConfig.Ldap.Attributes.Phone,
+				AddressAttribute: yamlConfig.Ldap.Attributes.Address,
+			})
+	}
 	return builder, nil
 }

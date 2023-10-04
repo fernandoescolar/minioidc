@@ -14,17 +14,29 @@ sqlite:
   use_in_grants: true
   use_in_sessions: true
   use_in_mfa: true
+ldap:
+    server: localhost:389
+    bind: uid=admin,cn=users,dc=example,dc=com
+    password: password
+    base_dn: dc=example,dc=com
+    filter_dn: (&(uid={username})(objectClass=person))
+    attributes:
+      subject: uidNumber
+      name: uid
+      email: mail
+      phone: telephoneNumber
+      address: homeDirectory
 clients:
   - id: myclient
     secret_hash: $2a$06$L6/zALdtbkYajjHTZUW29ePBEb/hwhgjhXC4YpHANavvKDJl69ctK # secret
     redirect_uris:
      - http://localhost:5000/callback
-users:
-  - subject: 1
-    email: use@mail.com
-    email_verified: true
-    preferred_username: user
-    password_hash: $2a$06$03dduqc0lMbsb5go/l6RI.cRb03Hos9CMpgm5/yYuRsSQPHtrFwSq # password
-    phone:
-    address:
-    groups:
+# users:
+#   - subject: 1
+#     email: use@mail.com
+#     email_verified: true
+#     preferred_username: user
+#     password_hash: $2a$06$03dduqc0lMbsb5go/l6RI.cRb03Hos9CMpgm5/yYuRsSQPHtrFwSq # password
+#     phone:
+#     address:
+#     groups:

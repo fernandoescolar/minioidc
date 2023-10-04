@@ -78,13 +78,8 @@ func (h *LoginHandler) postHTTP(w http.ResponseWriter, r *http.Request) {
 	username := r.FormValue("username")
 	password := r.FormValue("password")
 
-	user, err := h.userStore.GetUserByUsername(username)
+	user, err := h.userStore.GetUserByUsernameAndPassword(username, password)
 	if err != nil {
-		h.renderLoginPage(w, username, true, false, csrf)
-		return
-	}
-
-	if !user.PasswordIsValid(password) {
 		h.renderLoginPage(w, username, true, false, csrf)
 		return
 	}

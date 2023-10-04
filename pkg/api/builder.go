@@ -62,8 +62,31 @@ type Builder struct {
 	sqliteUseInSessions bool
 	sqliteUseInMFA      bool
 
+	ldapServer           string
+	ldapBind             string
+	ldapPassword         string
+	ldapFilterDN         string
+	ldapBaseDN           string
+	ldapSubjectAttribute string
+	ldapNameAttribute    string
+	ldapEmailAttribute   string
+	ldapPhoneAttribute   string
+	ldapAddressAttribute string
+
 	Clients []Client
 	Users   []User
+}
+
+type LDAPConfig struct {
+	Bind             string
+	Password         string
+	FilterDN         string
+	BaseDN           string
+	SubjectAttribute string
+	NameAttribute    string
+	EmailAttribute   string
+	PhoneAttribute   string
+	AddressAttribute string
 }
 
 type Client struct {
@@ -98,6 +121,20 @@ func (b *Builder) UseSQLite(f string, d SqliteDatabases) {
 	if d&MFA == MFA {
 		b.sqliteUseInMFA = true
 	}
+}
+
+// UseLDAP sets the LDAP connection parameters
+func (b *Builder) UseLDAP(server string, c LDAPConfig) {
+	b.ldapServer = server
+	b.ldapBind = c.Bind
+	b.ldapPassword = c.Password
+	b.ldapFilterDN = c.FilterDN
+	b.ldapBaseDN = c.BaseDN
+	b.ldapSubjectAttribute = c.SubjectAttribute
+	b.ldapNameAttribute = c.NameAttribute
+	b.ldapEmailAttribute = c.EmailAttribute
+	b.ldapPhoneAttribute = c.PhoneAttribute
+	b.ldapAddressAttribute = c.AddressAttribute
 }
 
 // builds the server
@@ -136,6 +173,38 @@ func (b *Builder) validate() error {
 	}
 	if b.sqliteUseInSessions && b.SessionStore != nil {
 		return errors.New("sqlite session store and session store are mutually exclusive")
+	}
+	if b.ldapServer != "" && b.UserStore != nil {
+		return errors.New("ldap and user store are mutually exclusive")
+	}
+	if b.ldapServer != "" {
+		if b.ldapBind == "" {
+			return errors.New("ldap bind is required")
+		}
+		if b.ldapPassword == "" {
+			return errors.New("ldap password is required")
+		}
+		if b.ldapFilterDN == "" {
+			return errors.New("ldap filter dn is required")
+		}
+		if b.ldapBaseDN == "" {
+			return errors.New("ldap base dn is required")
+		}
+		if b.ldapSubjectAttribute == "" {
+			return errors.New("ldap subject attribute is required")
+		}
+		if b.ldapNameAttribute == "" {
+			return errors.New("ldap name attribute is required")
+		}
+		if b.ldapEmailAttribute == "" {
+			return errors.New("ldap email attribute is required")
+		}
+		if b.ldapPhoneAttribute == "" {
+			return errors.New("ldap phone attribute is required")
+		}
+		if b.ldapAddressAttribute == "" {
+			return errors.New("ldap address attribute is required")
+		}
 	}
 
 	return nil
@@ -288,9 +357,23 @@ func (b *Builder) assignStores(config *domain.Config) error {
 		}
 	}
 
-	if b.UserStore == nil {
+	switch {
+	case b.ldapServer != "":
+		userStore = stores.NewLDAPUserStore(
+			b.ldapServer,
+			b.ldapBind,
+			b.ldapPassword,
+			b.ldapFilterDN,
+			b.ldapBaseDN,
+			b.ldapSubjectAttribute,
+			b.ldapNameAttribute,
+			b.ldapEmailAttribute,
+			b.ldapPhoneAttribute,
+			b.ldapAddressAttribute,
+		)
+	case b.UserStore == nil:
 		userStore = stores.NewUserStore()
-	} else {
+	default:
 		userStore = b.UserStore
 	}
 

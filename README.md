@@ -24,7 +24,7 @@ The following features are planned for future releases:
 - [x] Sqlite database for grants and sessions (and also for MFA)
 - [x] MFA with TOTP App (e.g. Google Authenticator)
 - [ ] MFA with email
-- [ ] Ldap Users integration
+- [x] Ldap Users integration
 
 ## Getting Started
 
@@ -87,6 +87,18 @@ sqlite:
   use_in_grants: true
   use_in_sessions: true
   use_in_mfa: true
+ldap:
+    server: localhost:389
+    bind: uid=admin,cn=users,dc=example,dc=com
+    password: password
+    base_dn: dc=example,dc=com
+    filter_dn: (&(uid={username})(objectClass=person))
+    attributes:
+      subject: uidNumber
+      name: uid
+      email: mail
+      phone: phone
+      address: address
 templates:
   base: templates/base.html
   login: templates/login2.html
@@ -139,6 +151,22 @@ In the `sqlite` section, you can configure the following SQLite settings:
 - `use_in_grants` - Whether to use the SQLite database for storing grant data (default: `false`)
 - `use_in_sessions` - Whether to use the SQLite database for storing session data (default: `false`)
 - `use_in_mfa` - Whether to use the SQLite database for storing MFA data (default: `false`)
+
+In the `ldap` section, you can configure the LDAP user store settings:
+
+- `server` - The LDAP server address
+- `bind` - The LDAP bind DN
+- `password` - The LDAP bind password
+- `base_dn` - The LDAP base DN
+- `filter_dn` - The LDAP filter DN
+- `attributes` - The LDAP attributes to use for each user property
+- `attributes.subject` - The LDAP attribute to use for the user subject
+- `attributes.name` - The LDAP attribute to use for the user name
+- `attributes.email` - The LDAP attribute to use for the user email
+- `attributes.phone` - The LDAP attribute to use for the user phone
+- `attributes.address` - The LDAP attribute to use for the user address
+
+> If you use LDAP users, you can not configure the `users` section in the yaml configuration file.
 
 In the `templates` section, you can configure the following html/templates:
 
@@ -251,6 +279,19 @@ The builder has the following fields:
 And the builder has the following methods:
 
 - `UseSQLite(string, SqliteDatabases)` - Set the SQLite database file path and databases to use (flags: `NoSqliteDatabases`, `Grants`, `Sessions` or `MFA`)
+- `UseLDAP(string, LDAPConfig)` - Set the LDAP server address and LDAP config to use
+
+The `LDAPConfig` struct has the following fields:
+
+- `Bind string` - The LDAP bind DN
+- `Password string` - The LDAP bind password
+- `BaseDN string` - The LDAP base DN
+- `FilterDN string` - The LDAP filter DN
+- `SubjectAttribute string` - The LDAP attribute to use for the user subject
+- `NameAttribute string` - The LDAP attribute to use for the user name
+- `EmailAttribute string` - The LDAP attribute to use for the user email
+- `PhoneAttribute string` - The LDAP attribute to use for the user phone
+- `AddressAttribute string` - The LDAP attribute to use for the user address
 
 ## Contributing
 

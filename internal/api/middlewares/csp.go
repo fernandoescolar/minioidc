@@ -17,6 +17,6 @@ func NewCSP(config *domain.Config) *CSP {
 }
 
 func (m *CSP) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
-	w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'self'; media-src 'self'; object-src 'none'; frame-src 'none';frame-ancestors 'none';base-uri 'self';form-action 'self'")
+	w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; media-src 'self'; object-src 'none'; frame-src 'none';frame-ancestors 'none';base-uri 'self';form-action 'self'")
 	next(w, r)
 }

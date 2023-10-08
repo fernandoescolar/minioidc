@@ -2,6 +2,7 @@ package stores
 
 import (
 	"fmt"
+	"log"
 	"strings"
 
 	"github.com/fernandoescolar/minioidc/pkg/domain"
@@ -30,8 +31,6 @@ type ldapUserStore struct {
 	emailAttribute   string
 	phoneAttribute   string
 	addressAttribute string
-
-	connection *ldap.Conn
 }
 
 func NewLDAPUserStore(
@@ -59,10 +58,6 @@ func NewLDAPUserStore(
 		addressAttribute: addressAttribute,
 	}
 
-	if err := s.connect(); err != nil {
-		panic(err)
-	}
-
 	return s
 }
 
@@ -88,23 +83,30 @@ func (us *ldapUserStore) GetUserByUsernameAndPassword(username, password string)
 	return us.auth(username, password)
 }
 
-func (us *ldapUserStore) connect() error {
+func (us *ldapUserStore) connect() (*ldap.Conn, error) {
 	conn, err := ldap.Dial("tcp", us.ldapServer)
 
 	if err != nil {
-		return fmt.Errorf("Failed to connect. %s", err)
+		log.Printf("Failed to connect to ldap: %s", err)
+		return nil, fmt.Errorf("Failed to connect. %s", err)
 	}
 
 	if err := conn.Bind(us.ldapBind, us.ldapPassword); err != nil {
-		return fmt.Errorf("Failed to bind. %s", err)
+		log.Printf("Ivalid ldap credentials: %s", err)
+		return nil, fmt.Errorf("Failed to bind. %s", err)
 	}
 
-	us.connection = conn
-	return nil
+	return conn, nil
 }
 
 func (us *ldapUserStore) list() (map[string]domain.User, error) {
-	result, err := us.connection.Search(ldap.NewSearchRequest(
+	connection, err := us.connect()
+	if err != nil {
+		return nil, err
+	}
+
+	defer connection.Close()
+	result, err := connection.Search(ldap.NewSearchRequest(
 		us.baseDN,
 		ldap.ScopeWholeSubtree,
 		ldap.NeverDerefAliases,
@@ -130,7 +132,13 @@ func (us *ldapUserStore) list() (map[string]domain.User, error) {
 }
 
 func (us *ldapUserStore) auth(username, password string) (domain.User, error) {
-	result, err := us.connection.Search(ldap.NewSearchRequest(
+	connection, err := us.connect()
+	if err != nil {
+		return nil, err
+	}
+
+	defer connection.Close()
+	result, err := connection.Search(ldap.NewSearchRequest(
 		us.baseDN,
 		ldap.ScopeWholeSubtree,
 		ldap.NeverDerefAliases,
@@ -138,7 +146,8 @@ func (us *ldapUserStore) auth(username, password string) (domain.User, error) {
 		0,
 		false,
 		us.filter(username),
-		[]string{us.subjectAttribute, us.nameAttribute, us.emailAttribute, us.phoneAttribute, us.addressAttribute},
+		//[]string{us.subjectAttribute, us.nameAttribute, us.emailAttribute, us.phoneAttribute, us.addressAttribute},
+		nil,
 		nil,
 	))
 
@@ -154,7 +163,7 @@ func (us *ldapUserStore) auth(username, password string) (domain.User, error) {
 		return nil, fmt.Errorf("Too many entries returned")
 	}
 
-	if err := us.connection.Bind(result.Entries[0].DN, password); err != nil {
+	if err := connection.Bind(result.Entries[0].DN, password); err != nil {
 		return nil, fmt.Errorf("Failed to auth user. %s", err)
 	}
 

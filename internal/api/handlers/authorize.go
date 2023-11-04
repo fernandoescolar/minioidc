@@ -67,6 +67,11 @@ func (h *AuthorizeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// refwrite csp
+	csp := w.Header().Get("Content-Security-Policy")
+	csp = strings.ReplaceAll(csp, "form-action 'self'", fmt.Sprintf("form-action 'self' %s;", redirectURI))
+	w.Header().Set("Content-Security-Policy", csp)
+
 	validType := assertEqualInQuery("response_type", "code",
 		utils.UnsupportedGrantType, "Invalid response type", w, r)
 	if !validType {
@@ -119,30 +124,6 @@ func (h *AuthorizeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ru.RawQuery = params.Encode()
 
 	http.Redirect(w, r, ru.String(), http.StatusFound)
-}
-
-func (h *AuthorizeHandler) getAuthenticatedUserFromCookies(r *http.Request) domain.Session {
-	cookie, err := r.Cookie("session")
-	if err != nil {
-		return nil
-	}
-
-	encryptedSessionID := cookie.Value
-	if encryptedSessionID == "" {
-		return nil
-	}
-
-	sessionID, err := cryptography.Decrypts(h.masterKey, encryptedSessionID)
-	if sessionID == "" || err != nil {
-		return nil
-	}
-
-	session, err := h.sessionStore.GetSessionByID(sessionID)
-	if session == nil || err != nil {
-		return nil
-	}
-
-	return session
 }
 
 func validateScope(w http.ResponseWriter, r *http.Request) bool {

@@ -67,17 +67,7 @@ func (h *AuthorizeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// refwrite csp
-	redirectURL, err := url.Parse(redirectURI)
-	if err != nil {
-		utils.Error(w, utils.InvalidRequest, "Invalid redirect uri", http.StatusBadRequest)
-		return
-	}
-
-	redirectHost := redirectURL.Hostname()
-	csp := w.Header().Get("Content-Security-Policy")
-	csp = strings.ReplaceAll(csp, "form-action 'self';", fmt.Sprintf("form-action 'self' https: %s;", redirectHost))
-	w.Header().Set("Content-Security-Policy", csp)
+	utils.AddRedirectToCSPHeader(w, redirectURI)
 
 	validType := assertEqualInQuery("response_type", "code",
 		utils.UnsupportedGrantType, "Invalid response type", w, r)

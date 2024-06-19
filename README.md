@@ -4,6 +4,10 @@ minioidc is a lightweight OpenID Connect (OIDC) server designed to provide Singl
 
 - *Authorization Code with PKCE*: Securely obtain an authorization code using Proof Key for Code Exchange (PKCE).
 - *Refresh Token*: Extend the validity of access tokens using refresh tokens.
+- *Client Credentials*: Authenticate clients using client credentials.
+- *Password*: Authenticate users using their username and password.
+- *Implicit*: Obtain tokens directly from the authorization endpoint.
+- *Hybrid*: Combine the authorization code and implicit flows.
 
 ## Features
 
@@ -18,9 +22,20 @@ minioidc is a lightweight OpenID Connect (OIDC) server designed to provide Singl
 
 The following features are planned for future releases:
 
-- [x] OIDC Discovery
-- [x] Authorization Code with PKCE
-- [x] Refresh Token
+- [x] OIDC Discovery endpoint with JWKS
+- [x] Authorization endpoint
+  - [x] Authorization Code with PKCE
+  - [x] Implicit flow
+  - [x] Hybrid flow
+- [ ] Device Code authorization endpoint
+- [x] Token endpoint
+  - [x] Refresh Token
+  - [x] Client Credentials
+  - [x] Password
+- [x] Userinfo endpoint
+- [ ] Introspection endpoint
+- [ ] Revocation endpoint
+- [ ] End session endpoint
 - [x] CSRF
 - [x] Yaml config file
 - [x] ENV secrets inside yaml config file
@@ -28,6 +43,12 @@ The following features are planned for future releases:
 - [x] MFA with TOTP App (e.g. Google Authenticator)
 - [ ] MFA with email?
 - [x] Ldap Users integration
+- [ ] Change password
+- [ ] Forgot password
+- [ ] MFAs management
+- [ ] MongoDB database for users, clients, grants and sessions (and also for MFA)
+- [ ] Groups or roles
+- [ ] Management API
 
 ## Getting Started
 

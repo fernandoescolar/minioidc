@@ -53,11 +53,25 @@ type grant struct {
 	codeChallengeMethod string
 }
 
+type standardClaims struct {
+	Audience  []string `json:"aud,omitempty"`
+	ExpiresAt int64    `json:"exp,omitempty"`
+	Id        string   `json:"jti,omitempty"`
+	IssuedAt  int64    `json:"iat,omitempty"`
+	Issuer    string   `json:"iss,omitempty"`
+	NotBefore int64    `json:"nbf,omitempty"`
+	Subject   string   `json:"sub,omitempty"`
+}
+
+func (c standardClaims) Valid() error {
+	return nil
+}
+
 // IDTokenClaims are the mandatory claims any User.Claims implementation
 // should use in their jwt.Claims building.
 type IDTokenClaims struct {
 	Nonce string `json:"nonce,omitempty"`
-	*jwt.StandardClaims
+	*standardClaims
 }
 
 func NewGrant(grantID string, grantType GrantType, client Client, session Session, expiresAt time.Time, scopes []string, oidcNonce, codeChallenge, codeChallengeMethod string) Grant {
@@ -120,18 +134,33 @@ func (g *grant) CodeChallengeMethod() string {
 }
 
 func (g *grant) AccessToken(issuer string, audience string, ttl time.Duration, kp *cryptography.Keypair, now time.Time) (string, error) {
+	clientTTL := g.client.GetAccessTokenTTL()
+	if clientTTL != nil {
+		ttl = *clientTTL
+	}
+
 	claims := g.standardClaims(issuer, audience, ttl, now)
 	return kp.SignJWT(claims)
 }
 
 func (g *grant) RefreshToken(issuer string, audience string, ttl time.Duration, kp *cryptography.Keypair, now time.Time) (string, error) {
+	clientTTL := g.client.GetRefreshTokenTTL()
+	if clientTTL != nil {
+		ttl = *clientTTL
+	}
+
 	claims := g.standardClaims(issuer, audience, ttl, now)
 	return kp.SignJWT(claims)
 }
 
 func (g *grant) IDToken(issuer string, audience string, ttl time.Duration, kp *cryptography.Keypair, now time.Time) (string, error) {
+	clientTTL := g.client.GetIDTokenTTL()
+	if clientTTL != nil {
+		ttl = *clientTTL
+	}
+
 	base := &IDTokenClaims{
-		StandardClaims: g.standardClaims(issuer, audience, ttl, now),
+		standardClaims: g.standardClaims(issuer, audience, ttl, now),
 		Nonce:          g.nonce,
 	}
 	claims, err := g.user.Claims(g.scopes, base)
@@ -142,9 +171,14 @@ func (g *grant) IDToken(issuer string, audience string, ttl time.Duration, kp *c
 	return kp.SignJWT(claims)
 }
 
-func (g *grant) standardClaims(issuer string, audience string, ttl time.Duration, now time.Time) *jwt.StandardClaims {
-	return &jwt.StandardClaims{
-		Audience:  audience,
+func (g *grant) standardClaims(issuer string, audience string, ttl time.Duration, now time.Time) *standardClaims {
+	audiences := g.client.GetAudiences()
+	if audience != "" {
+		audiences = append(audiences, audience)
+	}
+
+	return &standardClaims{
+		Audience:  audiences,
 		ExpiresAt: now.Add(ttl).Unix(),
 		Id:        g.ID(),
 		IssuedAt:  now.Unix(),

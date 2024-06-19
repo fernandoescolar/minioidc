@@ -2,17 +2,31 @@ package utils
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 )
 
 const (
-	InvalidRequest       = "invalid_request"
-	InvalidClient        = "invalid_client"
-	InvalidGrant         = "invalid_grant"
-	UnsupportedGrantType = "unsupported_grant_type"
-	InvalidScope         = "invalid_scope"
-	UnauthorizedClient   = "unauthorized_client"
+	// known oidc errors
+	InvalidRequest           = "invalid_request"
+	InteractionRequired      = "interaction_required"
+	LoginRequired            = "login_required"
+	AccountSelectionRequired = "account_selection_required"
+	ConsentRequired          = "consent_required"
+	InvalidRequestUri        = "invalid_request_uri"
+	InvalidateRequestObject  = "invalid_request_object"
+	UnsupportedRequest       = "request_not_supported"
+	UnsupportedRequestUri    = "request_uri_not_supported"
+	UnsupportedRegistration  = "registration_not_supported"
+	UnsupportedResponseType  = "unsupported_response_type"
+	InvalidScope             = "invalid_scope"
+	UnauthorizedClient       = "unauthorized_client"
+	AccessDenied             = "access_denied"
+	InvalidClient            = "invalid_client"
+	InvalidGrant             = "invalid_grant"
+	UnsupportedGrantType     = "unsupported_grant_type"
+	InvalidDPoPProof         = "invalid_dpop_proof"
 
 	internalServerError = "internal_server_error"
 	applicationJSON     = "application/json"
@@ -31,6 +45,10 @@ func JSON(w http.ResponseWriter, data []byte) {
 
 func InternalServerError(w http.ResponseWriter, errorMsg string) {
 	Error(w, internalServerError, errorMsg, http.StatusInternalServerError)
+}
+
+func ErrorMissingParameter(w http.ResponseWriter, param string) {
+	Error(w, InvalidRequest, fmt.Sprintf("The request is missing the required parameter: %s", param), http.StatusBadRequest)
 }
 
 func Error(w http.ResponseWriter, e, d string, statusCode int) {

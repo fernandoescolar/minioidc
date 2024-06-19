@@ -11,10 +11,21 @@ import (
 var (
 	GrantTypesSupported = []string{
 		"authorization_code",
+		"client_credentials",
+		"password",
 		"refresh_token",
+		// "urn:ietf:params:oauth:grant-type:jwt-bearer",
+		// "urn:ietf:params:oauth:grant-type:saml2-bearer",
+		// "urn:ietf:params:oauth:grant-type:device_code",
+		// "urn:ietf:params:oauth:grant-type:token-exchange",
 	}
 	ResponseTypesSupported = []string{
 		"code",
+		"token",
+		"token id_token",
+		"code id_token",
+		"code token",
+		"code id_token token",
 	}
 	SubjectTypesSupported = []string{
 		"public",
@@ -32,6 +43,8 @@ var (
 	TokenEndpointAuthMethodsSupported = []string{
 		"client_secret_basic",
 		"client_secret_post",
+		//"client_secret_jwt",
+		//"private_key_jwt",
 	}
 	ClaimsSupported = []string{
 		"sub",

@@ -61,10 +61,10 @@ func NewSqliteDB(filepath string) (*sql.DB, error) {
 }
 
 func migrateSqlite(db *sql.DB) error {
-	if err := migrateAddColumn(db, "sessions", "authTime", `ALTER TABLE sessions ADD COLUMN authTime DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP;`); err != nil {
+	if err := migrateAddColumn(db, "sessions", "authTime", `ALTER TABLE sessions ADD COLUMN authTime DATETIME NOT NULL DEFAULT '1970-01-01 00:00:00';`); err != nil {
 		return err
 	}
-	if err := migrateAddColumn(db, "grants", "issuedAt", `ALTER TABLE grants ADD COLUMN issuedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP;`); err != nil {
+	if err := migrateAddColumn(db, "grants", "issuedAt", `ALTER TABLE grants ADD COLUMN issuedAt DATETIME NOT NULL DEFAULT '1970-01-01 00:00:00';`); err != nil {
 		return err
 	}
 	return nil

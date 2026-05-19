@@ -32,7 +32,10 @@ func (ss *sqlSessionStore) NewSession(sessionID string, user domain.User, expire
 		expiresAt:  expiresAt,
 	}
 
-	_, err := ss.db.Exec("INSERT INTO sessions VALUES(?,?,?,?,?);", session.id, session.userID, session.requireMFA, session.expiresAt, session.authTime)
+	_, err := ss.db.Exec(
+		"INSERT INTO sessions(id, userID, requireMFA, expiresAt, authTime) VALUES(?,?,?,?,?);",
+		session.id, session.userID, session.requireMFA, session.expiresAt, session.authTime,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("NewSession: %w", err)
 	}

@@ -43,8 +43,10 @@ func (gs *sqlGrantStore) NewCodeGrant(id string, client domain.Client, session d
 		codeChallengeMethod: codeChallengeMethod,
 	}
 
-	_, err := gs.db.Exec("INSERT INTO grants VALUES(?,?,?,?,?,?,?,?,?,?);", grant.id, grant.grantType, grant.clientID, grant.sessionID, grant.issuedAt, grant.expiresAt, scopesStr, grant.nonce, grant.codeChallenge, grant.codeChallengeMethod)
-
+	_, err := gs.db.Exec(
+		"INSERT INTO grants(id, grantType, clientID, sessionID, issuedAt, expiresAt, scopes, nonce, codeChallenge, codeChallengeMethod) VALUES(?,?,?,?,?,?,?,?,?,?);",
+		grant.id, grant.grantType, grant.clientID, grant.sessionID, grant.issuedAt, grant.expiresAt, scopesStr, grant.nonce, grant.codeChallenge, grant.codeChallengeMethod,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("NewCodeGrant: %w", err)
 	}
@@ -65,7 +67,10 @@ func (gs *sqlGrantStore) NewRefreshTokenGrant(id string, client domain.Client, s
 		scopes:    scopesStr,
 	}
 
-	_, err := gs.db.Exec("INSERT INTO grants VALUES(?,?,?,?,?,?,?,?,?,?);", grant.id, grant.grantType, grant.clientID, grant.sessionID, grant.issuedAt, grant.expiresAt, scopesStr, grant.nonce, grant.codeChallenge, grant.codeChallengeMethod)
+	_, err := gs.db.Exec(
+		"INSERT INTO grants(id, grantType, clientID, sessionID, issuedAt, expiresAt, scopes, nonce, codeChallenge, codeChallengeMethod) VALUES(?,?,?,?,?,?,?,?,?,?);",
+		grant.id, grant.grantType, grant.clientID, grant.sessionID, grant.issuedAt, grant.expiresAt, scopesStr, grant.nonce, grant.codeChallenge, grant.codeChallengeMethod,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("NewRefreshTokenGrant: %w", err)
 	}

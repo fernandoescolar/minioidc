@@ -45,7 +45,7 @@ func JSON(w http.ResponseWriter, r interface{}) {
 
 	_, err = w.Write(bytes)
 	if err != nil {
-		log.Println("Error writing response: %w", err)
+		log.Printf("Error writing response: %v", err)
 	}
 }
 
@@ -74,7 +74,7 @@ func Error(w http.ResponseWriter, e, d string, statusCode int) {
 
 	_, err = w.Write(resp)
 	if err != nil {
-		log.Println("Error writing response: %w", err)
+		log.Printf("Error writing response: %v", err)
 	}
 }
 

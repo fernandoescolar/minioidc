@@ -23,7 +23,7 @@ func (h *TokenHandler) authorizationCodeGrant(tokenReq *tokenRequest, w http.Res
 
 	code, err := cryptography.Decrypts(h.masterKey, tokenReq.Code)
 	if err != nil {
-		log.Println("Error: getting code: %w", err)
+		log.Printf("Error: getting code: %v", err)
 		utils.InternalServerError(w, err.Error())
 		return nil
 	}

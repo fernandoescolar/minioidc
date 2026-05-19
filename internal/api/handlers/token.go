@@ -176,14 +176,14 @@ func (h *TokenHandler) createRefreshToken(grant domain.Grant, w http.ResponseWri
 	hid := cryptography.SHA256(id)
 	eid, err := cryptography.Encrypts(h.masterKey, id)
 	if err != nil {
-		log.Println("Error: creating refresh token id: %w", err)
+		log.Printf("Error: creating refresh token id: %v", err)
 		utils.InternalServerError(w, err.Error())
 		return "", false
 	}
 
 	_, err = h.grantStore.NewRefreshTokenGrant(hid, grant.Client(), grant.Session(), h.now(), h.now().Add(h.refreshTTL), grant.Scopes())
 	if err != nil {
-		log.Println("Error: creating refresh token: %w", err)
+		log.Printf("Error: creating refresh token: %v", err)
 		utils.InternalServerError(w, err.Error())
 		return "", false
 	}
@@ -200,7 +200,7 @@ func (h *TokenHandler) createTokenResponse(grant domain.Grant, tokenReq *tokenRe
 
 	tokens.AccessToken, err = grant.AccessToken(h.Issuer(r), h.audience, h.accessTTL, h.keypair, h.now())
 	if err != nil {
-		log.Println("Error: creating access token: %w", err)
+		log.Printf("Error: creating access token: %v", err)
 		utils.InternalServerError(w, err.Error())
 		return
 	}
@@ -212,7 +212,7 @@ func (h *TokenHandler) createTokenResponse(grant domain.Grant, tokenReq *tokenRe
 		grant.SetAtHash(domain.ComputeHalfHash(tokens.AccessToken))
 		tokens.IDToken, err = grant.IDToken(h.Issuer(r), h.audience, h.refreshTTL, h.keypair, h.now())
 		if err != nil {
-			log.Println("Error: creating id token: %w", err)
+			log.Printf("Error: creating id token: %v", err)
 			utils.InternalServerError(w, err.Error())
 			return
 		}

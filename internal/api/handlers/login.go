@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"html/template"
+	"log"
 	"net/http"
 	"time"
 
@@ -80,6 +81,7 @@ func (h *LoginHandler) postHTTP(w http.ResponseWriter, r *http.Request) {
 
 	user, err := h.userStore.GetUserByUsernameAndPassword(username, password)
 	if err != nil {
+		log.Printf("Error fetching user: %v", err)
 		h.renderLoginPage(w, username, true, false, csrf)
 		return
 	}
@@ -87,6 +89,7 @@ func (h *LoginHandler) postHTTP(w http.ResponseWriter, r *http.Request) {
 	expiresAt := h.now().Add(h.sessionTTL)
 	session, err := h.sessionStore.NewSession(stores.CreateUID(), user, expiresAt, h.requireMFA)
 	if err != nil {
+		log.Printf("Error creating session: %v", err)
 		h.renderLoginPage(w, username, false, true, csrf)
 		return
 	}
@@ -94,6 +97,7 @@ func (h *LoginHandler) postHTTP(w http.ResponseWriter, r *http.Request) {
 	// encrypt session ID
 	encryptedSessionID, err := cryptography.Encrypts(h.masterKey, session.ID())
 	if err != nil {
+		log.Printf("Error encrypting session ID: %v", err)
 		h.renderLoginPage(w, username, false, true, csrf)
 		return
 	}
@@ -137,6 +141,7 @@ func (h *LoginHandler) renderLoginPage(w http.ResponseWriter, username string, i
 		CSRF                       string
 	}{h.name, username, invalidLogin, unknownError, csrf})
 	if err != nil {
+		log.Printf("Error rendering template: %v", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}

@@ -106,7 +106,7 @@ func (h *MFAVerifyHandler) postHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.sessionStore.VerifyMFA(session.ID()); err != nil {
-		log.Println("verify mfa failed: %w", err)
+		log.Printf("verify mfa failed: %v", err)
 		model := mfaVerifyModel{
 			Name:                    h.issuer,
 			InvalidVerificationCode: false,

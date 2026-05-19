@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"html/template"
+	"log"
 	"net/http"
 
 	"github.com/fernandoescolar/minioidc/internal/api/utils"
@@ -87,11 +88,13 @@ func (h *ProfilePasswordHandler) postHTTP(w http.ResponseWriter, r *http.Request
 	// Hash and store new password
 	hash, err := cryptography.HashPassword(newPassword)
 	if err != nil {
+		log.Printf("Error hashing password: %v", err)
 		h.render(w, profilePasswordModel{Name: h.name, CSRF: csrf, UnknownError: true})
 		return
 	}
 
 	if err := h.userStore.UpdatePassword(session.User().ID(), hash); err != nil {
+		log.Printf("Error updating password: %v", err)
 		h.render(w, profilePasswordModel{Name: h.name, CSRF: csrf, UnknownError: true})
 		return
 	}
@@ -107,5 +110,7 @@ func (h *ProfilePasswordHandler) render(w http.ResponseWriter, model profilePass
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	tmpl.Execute(w, model)
+	if err := tmpl.Execute(w, model); err != nil {
+		log.Printf("Error rendering profile_password template: %v", err)
+	}
 }

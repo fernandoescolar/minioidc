@@ -122,7 +122,7 @@ func (h *MFACreateHandler) postHTTP(w http.ResponseWriter, r *http.Request) {
 
 	_, err := h.mfaStore.NewMFACode(stores.CreateUID(), session.User(), iv, "topt")
 	if err != nil {
-		log.Println("create mfa failed: %w", err)
+		log.Printf("create mfa failed: %v", err)
 		model := mfaCreateModel{
 			Name:                    h.issuer,
 			IV:                      iv,
@@ -135,7 +135,7 @@ func (h *MFACreateHandler) postHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.sessionStore.VerifyMFA(session.ID()); err != nil {
-		log.Println("verify mfa failed: %w", err)
+		log.Printf("verify mfa failed: %v", err)
 		model := mfaCreateModel{
 			Name:                    h.issuer,
 			IV:                      iv,

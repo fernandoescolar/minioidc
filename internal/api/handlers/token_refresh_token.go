@@ -38,7 +38,7 @@ func (h *TokenHandler) refreshTokenGrant(tokenReq *tokenRequest, w http.Response
 
 	dr, err := cryptography.Decrypts(h.masterKey, tokenReq.RefreshToken)
 	if err != nil {
-		log.Println("Error: getting refresh token: %w", err)
+		log.Printf("Error: getting refresh token: %v", err)
 		utils.Error(w, utils.InvalidGrant, "Invalid refresh token", http.StatusBadRequest)
 		return nil
 	}

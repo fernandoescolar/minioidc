@@ -174,7 +174,7 @@ func (h *IntrospectionHandler) introspectAccessToken(req *introspectionRequest, 
 func (h *IntrospectionHandler) introspectRefreshToken(req *introspectionRequest, w http.ResponseWriter, r *http.Request) {
 	dr, err := cryptography.Decrypts(h.masterKey, req.Token)
 	if err != nil {
-		log.Println("Error: getting refresh token: %w", err)
+		log.Printf("Error: getting refresh token: %v", err)
 		errorInactiveToken(w)
 		return
 	}

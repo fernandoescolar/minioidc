@@ -118,7 +118,7 @@ func (gs *sqlGrantStore) Grant(id string) error {
 func (gs *sqlGrantStore) CleanExpired() {
 	_, err := gs.db.Exec("DELETE FROM grants WHERE expiresAt < ?;", time.Now())
 	if err != nil {
-		log.Println("WRN Grants CleanExpired: %w", err)
+		log.Printf("WRN Grants CleanExpired: %v", err)
 	}
 }
 

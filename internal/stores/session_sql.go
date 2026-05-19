@@ -94,7 +94,7 @@ func (ss *sqlSessionStore) UpdateTTL(id string, expiresAt time.Time) error {
 func (ss *sqlSessionStore) DeleteUserSessions(userID string) {
 	_, err := ss.db.Exec("DELETE FROM sessions WHERE userID = ?;", userID)
 	if err != nil {
-		log.Println("WRN DeleteUserSessions: %w", err)
+		log.Printf("WRN DeleteUserSessions: %v", err)
 	}
 }
 
@@ -102,7 +102,7 @@ func (ss *sqlSessionStore) DeleteUserSessions(userID string) {
 func (ss *sqlSessionStore) CleanExpired() {
 	_, err := ss.db.Exec("DELETE FROM sessions WHERE expiresAt < ?;", time.Now())
 	if err != nil {
-		log.Println("WRN Session CleanExpired: %w", err)
+		log.Printf("WRN Session CleanExpired: %v", err)
 	}
 }
 

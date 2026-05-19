@@ -83,6 +83,10 @@ func (us *ldapUserStore) GetUserByUsernameAndPassword(username, password string)
 	return us.auth(username, password)
 }
 
+func (us *ldapUserStore) UpdatePassword(userID, passwordHash string) error {
+	return fmt.Errorf("change password is not supported for LDAP users")
+}
+
 func (us *ldapUserStore) connect() (*ldap.Conn, error) {
 	conn, err := ldap.Dial("tcp", us.ldapServer)
 

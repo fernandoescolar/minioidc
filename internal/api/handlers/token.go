@@ -1,10 +1,10 @@
 package handlers
 
 import (
-	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/fernandoescolar/minioidc/internal/api/utils"
@@ -29,7 +29,9 @@ type TokenHandler struct {
 	refreshTTL         time.Duration
 	clientStore        domain.ClientStore
 	grantStore         domain.GrantStore
+	sessionStore       domain.SessionStore
 	userStore          domain.UserStore
+	deviceCodeStore    domain.DeviceCodeStore
 }
 
 type tokenRequest struct {
@@ -67,6 +69,7 @@ type tokenResponse struct {
 	IDToken      string        `json:"id_token,omitempty"`
 	TokenType    string        `json:"token_type"`
 	ExpiresIn    time.Duration `json:"expires_in"`
+	Scope        string        `json:"scope,omitempty"`
 }
 
 var _ http.Handler = (*TokenHandler)(nil)
@@ -83,8 +86,14 @@ func NewTokenHandler(config *domain.Config, now func() time.Time) *TokenHandler 
 		refreshTTL:         config.RefreshTTL,
 		clientStore:        config.ClientStore,
 		grantStore:         config.GrantStore,
+		sessionStore:       config.SessionStore,
 		userStore:          config.UserStore,
+		deviceCodeStore:    config.DeviceCodeStore,
 	}
+}
+
+func (h *TokenHandler) Issuer(r *http.Request) string {
+	return utils.GetIssuer(h.issuer, r)
 }
 
 func (h *TokenHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -110,9 +119,9 @@ func (h *TokenHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "client_credentials":
 		grant = h.clientCredentialsGrant(tokenReq, w)
 	case "urn:ietf:params:oauth:grant-type:device_code":
-		utils.Error(w, utils.UnsupportedGrantType, "Device code grant type is not supported", http.StatusBadRequest)
+		grant = h.deviceCodeGrant(tokenReq, w)
 	case "urn:ietf:params:oauth:grant-type:jwt-bearer":
-		utils.Error(w, utils.UnsupportedGrantType, "JWT bearer grant type is not supported", http.StatusBadRequest)
+		grant = h.jwtBearerGrant(tokenReq, w)
 	case "urn:ietf:params:oauth:grant-type:saml2-bearer":
 		utils.Error(w, utils.UnsupportedGrantType, "SAML2 bearer grant type is not supported", http.StatusBadRequest)
 	case "urn:ietf:params:oauth:grant-type:token-exchange":
@@ -125,7 +134,7 @@ func (h *TokenHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.createTokenResponse(grant, tokenReq, w)
+	h.createTokenResponse(grant, tokenReq, w, r)
 }
 
 func (h *TokenHandler) parseTokenRequest(r *http.Request) (*tokenRequest, error) {
@@ -172,7 +181,7 @@ func (h *TokenHandler) createRefreshToken(grant domain.Grant, w http.ResponseWri
 		return "", false
 	}
 
-	_, err = h.grantStore.NewRefreshTokenGrant(hid, grant.Client(), grant.Session(), h.now().Add(h.refreshTTL), grant.Scopes())
+	_, err = h.grantStore.NewRefreshTokenGrant(hid, grant.Client(), grant.Session(), h.now(), h.now().Add(h.refreshTTL), grant.Scopes())
 	if err != nil {
 		log.Println("Error: creating refresh token: %w", err)
 		utils.InternalServerError(w, err.Error())
@@ -182,22 +191,26 @@ func (h *TokenHandler) createRefreshToken(grant domain.Grant, w http.ResponseWri
 	return eid, true
 }
 
-func (h *TokenHandler) createTokenResponse(grant domain.Grant, tokenReq *tokenRequest, w http.ResponseWriter) {
+func (h *TokenHandler) createTokenResponse(grant domain.Grant, tokenReq *tokenRequest, w http.ResponseWriter, r *http.Request) {
 	tokens := &tokenResponse{
 		TokenType: "bearer",
 		ExpiresIn: h.accessTTL,
 	}
 	var err error
 
-	tokens.AccessToken, err = grant.AccessToken(h.issuer, h.audience, h.accessTTL, h.keypair, h.now())
+	tokens.AccessToken, err = grant.AccessToken(h.Issuer(r), h.audience, h.accessTTL, h.keypair, h.now())
 	if err != nil {
 		log.Println("Error: creating access token: %w", err)
 		utils.InternalServerError(w, err.Error())
 		return
 	}
 
+	tokens.Scope = strings.Join(grant.Scopes(), " ")
+
 	if len(grant.Scopes()) > 0 && grant.Scopes()[0] == openidScope {
-		tokens.IDToken, err = grant.IDToken(h.issuer, h.audience, h.refreshTTL, h.keypair, h.now())
+		// Compute at_hash (OIDC Core §3.3.2.11) before signing the id_token.
+		grant.SetAtHash(domain.ComputeHalfHash(tokens.AccessToken))
+		tokens.IDToken, err = grant.IDToken(h.Issuer(r), h.audience, h.refreshTTL, h.keypair, h.now())
 		if err != nil {
 			log.Println("Error: creating id token: %w", err)
 			utils.InternalServerError(w, err.Error())
@@ -217,15 +230,7 @@ func (h *TokenHandler) createTokenResponse(grant domain.Grant, tokenReq *tokenRe
 		tokens.RefreshToken = id
 	}
 
-	resp, err := json.Marshal(tokens)
-	if err != nil {
-		log.Println("Error: marshaling tokens: %w", err)
-		utils.InternalServerError(w, err.Error())
-		return
-	}
-
-	utils.NoCache(w)
-	utils.JSON(w, resp)
+	utils.JSON(w, tokens)
 }
 
 func containsOfflineAccess(scopes []string) bool {

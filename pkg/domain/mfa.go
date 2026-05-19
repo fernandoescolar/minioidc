@@ -4,6 +4,7 @@ type MFACodeStore interface {
 	NewMFACode(id string, user User, secret, method string) (MFACode, error)
 	UserHasMFACodes(userID string) (bool, error)
 	GetMFACodeByUserID(userID string) ([]MFACode, error)
+	DeleteMFACode(id string) error
 	DeleteUserMFACodes(userID string)
 }
 

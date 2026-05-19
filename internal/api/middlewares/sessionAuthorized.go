@@ -39,6 +39,24 @@ func (m *SessionAuthorized) ServeHTTP(w http.ResponseWriter, r *http.Request, ne
 
 	session, valid := m.validateSession(w, r)
 	if !valid {
+		if r.URL.Query().Get("prompt") == "none" {
+			redirectURI := r.URL.Query().Get("redirect_uri")
+			state := r.URL.Query().Get("state")
+			if redirectURI != "" {
+				ru, err := url.Parse(redirectURI)
+				if err == nil {
+					params, _ := url.ParseQuery(ru.RawQuery)
+					params.Set("error", "login_required")
+					params.Set("error_description", "User is not authenticated")
+					if state != "" {
+						params.Set("state", state)
+					}
+					ru.RawQuery = params.Encode()
+					http.Redirect(w, r, ru.String(), http.StatusFound)
+					return
+				}
+			}
+		}
 		returnURL := r.URL.String()
 		returnURL = url.QueryEscape(returnURL)
 		location := fmt.Sprintf("%s?return_url=%s", m.loginEndpoint, returnURL)

@@ -1,0 +1,58 @@
+{{define "content"}}
+<div class="form">
+    <h2>Manage MFA</h2>
+
+    {{ if .Success }}
+    <p class="success">✅ Authenticator added successfully.</p>
+    {{ end }}
+
+    {{ if .UnknownError }}
+    <p class="error">☢️ Error. Try it again later or contact the administrator.</p>
+    {{ end }}
+
+    {{ if .MFACodes }}
+    <h3>Registered Authenticators</h3>
+    {{ range .MFACodes }}
+    <form method="post" style="display:inline;">
+        <span>{{ .Method }} &mdash; {{ .ID }}</span>
+        <input type="hidden" name="action" value="delete">
+        <input type="hidden" name="id" value="{{ .ID }}">
+        <input type="hidden" name="__csrf" value="{{ $.CSRF }}">
+        <button type="submit">Remove</button>
+    </form>
+    {{ end }}
+    {{ else }}
+    <p>No authenticators registered.</p>
+    {{ end }}
+
+    <hr>
+    <h3>Add Authenticator</h3>
+    <p>Scan this QR code using your authenticator app:</p>
+    <div id="qrcode" data-qr="{{.QRCode}}"></div>
+    <p class="error">
+        {{ if .InvalidCode }}
+        ⚠️ Invalid verification code
+        {{ end }}
+    </p>
+    <form class="form" method="post">
+        <p>Enter the code shown in your app to confirm:</p>
+        <div class="otp-wrapper">
+            <input
+                type="text"
+                autocomplete="one-time-code"
+                inputmode="numeric"
+                maxlength="6"
+                pattern="\d{6}"
+                name="verification_code" />
+            <button type="submit">Add</button>
+        </div>
+        <input type="hidden" name="action" value="add">
+        <input type="hidden" name="verification_iv" value="{{.IV}}">
+        <input type="hidden" name="__csrf" value="{{ .CSRF }}">
+    </form>
+
+    <a href="/profile">Back to Profile</a>
+</div>
+<script src="/static/qrcode.min.js"></script>
+<script defer src="/static/qrcode.gen.js"></script>
+{{end}}

@@ -25,22 +25,21 @@ func (h *TokenHandler) refreshTokenGrant(tokenReq *tokenRequest, w http.Response
 		return nil
 	}
 
-	_, err := h.clientStore.GetClientByID(tokenReq.ClientID)
+	client, err := h.clientStore.GetClientByID(tokenReq.ClientID)
 	if err != nil {
 		utils.Error(w, utils.InvalidClient, "Invalid client id", http.StatusUnauthorized)
 		return nil
 	}
 
-	// validSecret := client.ClientSecretIsValid(tokenReq.ClientSecret)
-	// if !validSecret {
-	// 	errorResponse(rw, InvalidClient, "Invalid client secret", http.StatusUnauthorized)
-	// 	return nil, false
-	// }
+	if !client.ClientSecretIsValid(tokenReq.ClientSecret) {
+		utils.Error(w, utils.InvalidClient, "Invalid client secret", http.StatusUnauthorized)
+		return nil
+	}
 
 	dr, err := cryptography.Decrypts(h.masterKey, tokenReq.RefreshToken)
 	if err != nil {
 		log.Println("Error: getting refresh token: %w", err)
-		utils.InternalServerError(w, err.Error())
+		utils.Error(w, utils.InvalidGrant, "Invalid refresh token", http.StatusBadRequest)
 		return nil
 	}
 

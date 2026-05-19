@@ -14,13 +14,15 @@ const createSqlite string = `
     id TEXT PRIMARY KEY,
 	userID TEXT NOT NULL,
 	requireMFA INTEGER DEFAULT 1,
-	expiresAt DATETIME NOT NULL
+	expiresAt DATETIME NOT NULL,
+	authTime DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
   );
   CREATE TABLE IF NOT EXISTS grants (
 	id TEXT PRIMARY KEY,
 	grantType TEXT NOT NULL,
 	clientID TEXT NOT NULL,
 	sessionID TEXT NOT NULL,
+	issuedAt DATETIME NOT NULL,
 	expiresAt DATETIME NOT NULL,
 	scopes TEXT NOT NULL,
 	nonce TEXT,

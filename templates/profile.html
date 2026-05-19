@@ -1,0 +1,10 @@
+{{define "content"}}
+<div class="form">
+    <h2>Profile</h2>
+    <p>Signed in as <strong>{{ .Username }}</strong></p>
+    <nav>
+        <a href="/profile/password"><button type="button">Change Password</button></a>
+        <a href="/profile/mfa"><button type="button">Manage MFA</button></a>
+    </nav>
+</div>
+{{end}}

@@ -86,6 +86,12 @@ func (ms *sqlMFACodeStore) DeleteUserMFACodes(userID string) {
 	ms.db.Exec("DELETE FROM mfa WHERE userID = ?;", userID)
 }
 
+// DeleteMFACode deletes a single MFACode by its id
+func (ms *sqlMFACodeStore) DeleteMFACode(id string) error {
+	_, err := ms.db.Exec("DELETE FROM mfa WHERE id = ?;", id)
+	return err
+}
+
 // MFACode converts a miniMFACode to a MFACode
 func (ms *sqlMFACodeStore) MFACode(mfaCode *miniMFACode) (domain.MFACode, error) {
 	user, err := ms.userStore.GetUserByID(mfaCode.userID)

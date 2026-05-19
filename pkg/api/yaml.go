@@ -35,10 +35,14 @@ type YamlConfig struct {
 	} `yaml:"ttl"`
 
 	Templates struct {
-		Base      string `yaml:"base"`
-		Login     string `yaml:"login"`
-		MFACreate string `yaml:"mfa_create"`
-		MFAVerify string `yaml:"mfa_verify"`
+		Base            string `yaml:"base"`
+		Login           string `yaml:"login"`
+		MFACreate       string `yaml:"mfa_create"`
+		MFAVerify       string `yaml:"mfa_verify"`
+		Device          string `yaml:"device"`
+		Profile         string `yaml:"profile"`
+		ProfilePassword string `yaml:"profile_password"`
+		ProfileMFA      string `yaml:"profile_mfa"`
 	} `yaml:"templates"`
 
 	Sqlite struct {
@@ -148,10 +152,14 @@ func NewYamlBuilder(filepath string) (*Builder, error) {
 		UseForwardedHeaders: yamlConfig.Middlewares.ForwardHeaders,
 		LogRequests:         yamlConfig.Middlewares.LogRequests,
 
-		BaseTemplateFilepath:      yamlConfig.Templates.Base,
-		LoginTemplateFilepath:     yamlConfig.Templates.Login,
-		MFACreateTemplateFilepath: yamlConfig.Templates.MFACreate,
-		MFAVerifyTemplateFilepath: yamlConfig.Templates.MFAVerify,
+		BaseTemplateFilepath:            yamlConfig.Templates.Base,
+		LoginTemplateFilepath:           yamlConfig.Templates.Login,
+		MFACreateTemplateFilepath:       yamlConfig.Templates.MFACreate,
+		MFAVerifyTemplateFilepath:       yamlConfig.Templates.MFAVerify,
+		DeviceTemplateFilepath:          yamlConfig.Templates.Device,
+		ProfileTemplateFilepath:         yamlConfig.Templates.Profile,
+		ProfilePasswordTemplateFilepath: yamlConfig.Templates.ProfilePassword,
+		ProfileMFATemplateFilepath:      yamlConfig.Templates.ProfileMFA,
 
 		AccessTTL:  time.Duration(yamlConfig.TTL.Access) * time.Minute,
 		RefreshTTL: time.Duration(yamlConfig.TTL.Refresh) * time.Minute,

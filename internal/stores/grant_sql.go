@@ -28,13 +28,14 @@ func NewSqliteGrantStore(db *sql.DB, clientStore domain.ClientStore, sessionStor
 }
 
 // NewCodeGrant creates a new Grant for a User
-func (gs *sqlGrantStore) NewCodeGrant(id string, client domain.Client, session domain.Session, expiresAt time.Time, scopes []string, nonce string, codeChallenge, codeChallengeMethod string) (domain.Grant, error) {
+func (gs *sqlGrantStore) NewCodeGrant(id string, client domain.Client, session domain.Session, issuedAt, expiresAt time.Time, scopes []string, nonce string, codeChallenge, codeChallengeMethod string) (domain.Grant, error) {
 	scopesStr := strings.Join(scopes, " ")
 	grant := &miniGrant{
 		id:                  id,
 		grantType:           domain.GrantTypeCode,
 		clientID:            client.ClientID(),
 		sessionID:           session.ID(),
+		issuedAt:            issuedAt,
 		expiresAt:           expiresAt,
 		scopes:              scopesStr,
 		nonce:               nonce,
@@ -42,7 +43,7 @@ func (gs *sqlGrantStore) NewCodeGrant(id string, client domain.Client, session d
 		codeChallengeMethod: codeChallengeMethod,
 	}
 
-	_, err := gs.db.Exec("INSERT INTO grants VALUES(?,?,?,?,?,?,?,?,?);", grant.id, grant.grantType, grant.clientID, grant.sessionID, grant.expiresAt, scopesStr, grant.nonce, grant.codeChallenge, grant.codeChallengeMethod)
+	_, err := gs.db.Exec("INSERT INTO grants VALUES(?,?,?,?,?,?,?,?,?,?);", grant.id, grant.grantType, grant.clientID, grant.sessionID, grant.issuedAt, grant.expiresAt, scopesStr, grant.nonce, grant.codeChallenge, grant.codeChallengeMethod)
 
 	if err != nil {
 		return nil, fmt.Errorf("NewCodeGrant: %w", err)
@@ -52,18 +53,19 @@ func (gs *sqlGrantStore) NewCodeGrant(id string, client domain.Client, session d
 }
 
 // NewRefreshTokenGrant creates a new Grant for a User
-func (gs *sqlGrantStore) NewRefreshTokenGrant(id string, client domain.Client, session domain.Session, expiresAt time.Time, scopes []string) (domain.Grant, error) {
+func (gs *sqlGrantStore) NewRefreshTokenGrant(id string, client domain.Client, session domain.Session, issuedAt, expiresAt time.Time, scopes []string) (domain.Grant, error) {
 	scopesStr := strings.Join(scopes, " ")
 	grant := &miniGrant{
 		id:        id,
 		grantType: domain.GrantTypeRefresh,
 		clientID:  client.ClientID(),
 		sessionID: session.ID(),
+		issuedAt:  issuedAt,
 		expiresAt: expiresAt,
 		scopes:    scopesStr,
 	}
 
-	_, err := gs.db.Exec("INSERT INTO grants VALUES(?,?,?,?,?,?,?,?,?);", grant.id, grant.grantType, grant.clientID, grant.sessionID, grant.expiresAt, scopesStr, grant.nonce, grant.codeChallenge, grant.codeChallengeMethod)
+	_, err := gs.db.Exec("INSERT INTO grants VALUES(?,?,?,?,?,?,?,?,?,?);", grant.id, grant.grantType, grant.clientID, grant.sessionID, grant.issuedAt, grant.expiresAt, scopesStr, grant.nonce, grant.codeChallenge, grant.codeChallengeMethod)
 	if err != nil {
 		return nil, fmt.Errorf("NewRefreshTokenGrant: %w", err)
 	}
@@ -74,8 +76,8 @@ func (gs *sqlGrantStore) NewRefreshTokenGrant(id string, client domain.Client, s
 // GetGrantByID looks up the Grant
 func (gs *sqlGrantStore) GetGrantByID(id string) (domain.Grant, error) {
 	grant := &miniGrant{}
-	row := gs.db.QueryRow("SELECT id, grantType, clientID, sessionID, expiresAt, scopes, nonce, codeChallenge, codeChallengeMethod FROM grants WHERE id = ?;", id)
-	err := row.Scan(&grant.id, &grant.grantType, &grant.clientID, &grant.sessionID, &grant.expiresAt, &grant.scopes, &grant.nonce, &grant.codeChallenge, &grant.codeChallengeMethod)
+	row := gs.db.QueryRow("SELECT id, grantType, clientID, sessionID, issuedAt, expiresAt, scopes, nonce, codeChallenge, codeChallengeMethod FROM grants WHERE id = ?;", id)
+	err := row.Scan(&grant.id, &grant.grantType, &grant.clientID, &grant.sessionID, &grant.issuedAt, &grant.expiresAt, &grant.scopes, &grant.nonce, &grant.codeChallenge, &grant.codeChallengeMethod)
 	if err != nil {
 		return nil, fmt.Errorf("GetGrantByID: %w", err)
 	}
@@ -132,5 +134,5 @@ func (gs *sqlGrantStore) ToGrant(grant *miniGrant) (domain.Grant, error) {
 	}
 
 	scopes := strings.Split(grant.scopes, " ")
-	return domain.NewGrant(grant.id, grant.grantType, client, session, grant.expiresAt, scopes, grant.nonce, grant.codeChallenge, grant.codeChallengeMethod), nil
+	return domain.NewGrant(grant.id, grant.grantType, client, session, grant.issuedAt, grant.expiresAt, scopes, grant.nonce, grant.codeChallenge, grant.codeChallengeMethod), nil
 }

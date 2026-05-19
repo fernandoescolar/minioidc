@@ -31,19 +31,20 @@ func (h *TokenHandler) clientCredentialsGrant(tokenReq *tokenRequest, w http.Res
 	}
 
 	if !client.ScopesAreValid(tokenReq.Scopes) {
-		utils.Error(w, utils.InvalidScope, "Invalid scope", http.StatusUnauthorized)
+		utils.Error(w, utils.InvalidScope, "Invalid scope", http.StatusBadRequest)
 		return nil
 	}
 
 	id := stores.CreateComplexUID()
 	user := domain.NewUser(tokenReq.ClientID, "", "", "", "", []string{}, "")
-	session := domain.NewSession(id, user, false, h.now().Add(h.accessTTL))
+	session := domain.NewSession(id, user, false, h.now(), h.now().Add(h.accessTTL))
 
 	return domain.NewGrant(
 		id,
 		domain.GrantTypeCode,
 		client,
 		session,
+		h.now(),
 		h.now().Add(h.accessTTL),
 		tokenReq.Scopes,
 		"",

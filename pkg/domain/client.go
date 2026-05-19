@@ -30,6 +30,12 @@ type Client interface {
 	// GetAudiences returns the audiences for this client
 	GetAudiences() []string
 
+	// RequirePKCE returns true if the client requires PKCE
+	RequirePKCE() bool
+
+	// ReuseRefreshTokens returns true if the client can reuse refresh tokens
+	ReuseRefreshTokens() *bool
+
 	// GetAuthorizationCodeTTL returns the TTL for the authorization code
 	GetAuthorizationCodeTTL() *time.Duration
 
@@ -80,9 +86,31 @@ func (c *client) RedirectURLIsValid(url string) bool {
 	return false
 }
 
-// ScopesAreValid returns true if the passed scopes are valid for
-// this Client
+// standardOIDCScopes is the set of scopes the default in-memory client supports.
+var standardOIDCScopes = []string{
+	"openid",
+	"email",
+	"profile",
+	"groups",
+	"offline_access",
+	"phone",
+	"address",
+}
+
+// ScopesAreValid returns true if all requested scopes are recognised OIDC scopes.
 func (c *client) ScopesAreValid(scopes []string) bool {
+	for _, scope := range scopes {
+		valid := false
+		for _, vs := range standardOIDCScopes {
+			if scope == vs {
+				valid = true
+				break
+			}
+		}
+		if !valid {
+			return false
+		}
+	}
 	return true
 }
 
@@ -95,6 +123,17 @@ func (c *client) ResponseTypeIsValid(responseType string) bool {
 // GetAudiences returns the audiences for this client
 func (c *client) GetAudiences() []string {
 	return []string{c.id}
+}
+
+// RequirePKCE returns true if the client requires PKCE
+// Public clients (no secret hash) always require PKCE; confidential clients do not.
+func (c *client) RequirePKCE() bool {
+	return c.secretHash == ""
+}
+
+// ReuseRefreshTokens returns true if the client can reuse refresh tokens
+func (c *client) ReuseRefreshTokens() *bool {
+	return nil
 }
 
 // GetAuthorizationCodeTTL returns the TTL for the authorization code

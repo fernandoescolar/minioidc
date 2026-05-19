@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"fmt"
 	"net/http"
 	"net/url"
 	"slices"
@@ -69,6 +70,10 @@ func NewAuthorizeHandler(config *domain.Config, now func() time.Time, loginEndpo
 	}
 }
 
+func (h *AuthorizeHandler) Issuer(r *http.Request) string {
+	return utils.GetIssuer(h.issuer, r)
+}
+
 func (h *AuthorizeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodPost {
 		utils.Error(w, utils.InvalidRequest, "Invalid request method", http.StatusMethodNotAllowed)
@@ -96,6 +101,11 @@ func (h *AuthorizeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if strings.Contains(authReq.ResponseType, "id_token") && authReq.Nonce == "" {
+		utils.ErrorMissingParameter(w, "nonce")
+		return
+	}
+
 	if authReq.RedirectURI == "" {
 		utils.ErrorMissingParameter(w, "redirect_uri")
 		return
@@ -113,11 +123,17 @@ func (h *AuthorizeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !client.ScopesAreValid(authReq.Scopes) {
+		utils.Error(w, utils.InvalidScope, "Invalid scope", http.StatusBadRequest)
 		return
 	}
 
 	if !client.ResponseTypeIsValid(authReq.ResponseType) {
 		utils.Error(w, utils.InvalidRequest, "Invalid response type", http.StatusBadRequest)
+		return
+	}
+
+	if client.RequirePKCE() && strings.Contains(authReq.ResponseType, "code") && authReq.CodeChallenge == "" {
+		utils.Error(w, utils.InvalidRequest, "code_challenge required for public clients", http.StatusBadRequest)
 		return
 	}
 
@@ -131,6 +147,29 @@ func (h *AuthorizeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// the session should be handled in the SessionAuthorized middleware
 		utils.InternalServerError(w, "Session not found")
 		return
+	}
+
+	if authReq.MaxAge != nil {
+		elapsed := h.now().Sub(session.AuthTime())
+		maxAgeDur := time.Duration(*authReq.MaxAge) * time.Second
+		if elapsed > maxAgeDur {
+			if authReq.Prompt == "none" {
+				ru, _ := url.Parse(authReq.RedirectURI)
+				params, _ := url.ParseQuery(ru.RawQuery)
+				params.Set("error", utils.LoginRequired)
+				params.Set("error_description", "Authentication is too old")
+				if authReq.State != "" {
+					params.Set("state", authReq.State)
+				}
+				ru.RawQuery = params.Encode()
+				http.Redirect(w, r, ru.String(), http.StatusFound)
+				return
+			}
+			http.SetCookie(w, &http.Cookie{Name: "session", Value: "", MaxAge: -1, Path: "/"})
+			location := fmt.Sprintf("%s?return_url=%s", h.loginEndpoint, url.QueryEscape(r.URL.String()))
+			http.Redirect(w, r, location, http.StatusFound)
+			return
+		}
 	}
 
 	utils.AddRedirectToCSPHeader(w, authReq.RedirectURI)
@@ -149,14 +188,18 @@ func (h *AuthorizeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if strings.Contains(authReq.ResponseType, "token") || strings.Contains(authReq.ResponseType, "id_token") {
 		grant := h.createDefaultGrant(id, client, session, authReq)
 		if strings.Contains(authReq.ResponseType, "token") {
-			accessToken, err = grant.AccessToken(h.issuer, h.audience, h.accessTokenTTL, h.keypair, h.now())
+			accessToken, err = grant.AccessToken(h.Issuer(r), h.audience, h.accessTokenTTL, h.keypair, h.now())
 			if err != nil {
 				utils.InternalServerError(w, err.Error())
 				return
 			}
+			grant.SetAtHash(domain.ComputeHalfHash(accessToken))
+		}
+		if code != "" {
+			grant.SetCHash(domain.ComputeHalfHash(code))
 		}
 		if strings.Contains(authReq.ResponseType, "id_token") {
-			idToken, err = grant.IDToken(h.issuer, h.audience, h.accessTokenTTL, h.keypair, h.now())
+			idToken, err = grant.IDToken(h.Issuer(r), h.audience, h.accessTokenTTL, h.keypair, h.now())
 			if err != nil {
 				utils.InternalServerError(w, err.Error())
 				return
@@ -225,6 +268,7 @@ func (h *AuthorizeHandler) createCodeGrant(id, hid string, client domain.Client,
 		hid,
 		client,
 		session,
+		h.now(),
 		h.now().Add(*ttl),
 		authReq.Scopes,
 		authReq.Nonce,
@@ -241,6 +285,7 @@ func (h *AuthorizeHandler) createDefaultGrant(id string, client domain.Client, s
 		domain.GrantTypeCode,
 		client,
 		session,
+		h.now(),
 		h.now().Add(h.codeTTL),
 		authReq.Scopes,
 		authReq.Nonce,

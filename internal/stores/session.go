@@ -19,6 +19,7 @@ type miniSession struct {
 	id         string
 	userID     string
 	requireMFA bool
+	authTime   time.Time
 	expiresAt  time.Time
 }
 
@@ -35,6 +36,7 @@ func (ss *miniSessionStore) NewSession(sessionID string, user domain.User, expir
 		id:         sessionID,
 		userID:     user.ID(),
 		requireMFA: requireMFA,
+		authTime:   time.Now(),
 		expiresAt:  expiresAt,
 	}
 
@@ -109,5 +111,5 @@ func (ss *miniSessionStore) Session(session *miniSession) (domain.Session, error
 		return nil, fmt.Errorf("Session: %w", err)
 	}
 
-	return domain.NewSession(session.id, user, session.requireMFA, session.expiresAt), nil
+	return domain.NewSession(session.id, user, session.requireMFA, session.authTime, session.expiresAt), nil
 }

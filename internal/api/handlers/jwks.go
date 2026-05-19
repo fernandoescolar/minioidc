@@ -7,7 +7,7 @@ import (
 	"github.com/fernandoescolar/minioidc/internal/api/utils"
 	"github.com/fernandoescolar/minioidc/pkg/cryptography"
 	"github.com/fernandoescolar/minioidc/pkg/domain"
-	"gopkg.in/square/go-jose.v2"
+	"github.com/go-jose/go-jose/v4"
 )
 
 type JWKSHandler struct {
@@ -29,7 +29,10 @@ func (h *JWKSHandler) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 
-	utils.JSON(w, jwks)
+	utils.NoCache(w)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(jwks)
 }
 
 func (h *JWKSHandler) jwks() ([]byte, error) {

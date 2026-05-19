@@ -1,5 +1,8 @@
 .DS_Store
+.idea
+.vscode
 bin
 obj
+vendor
 *.pem
 *.sqlite3

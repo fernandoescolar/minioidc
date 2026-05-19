@@ -32,12 +32,18 @@ const (
 	applicationJSON     = "application/json"
 )
 
-func JSON(w http.ResponseWriter, data []byte) {
+func JSON(w http.ResponseWriter, r interface{}) {
+	bytes, err := json.Marshal(r)
+	if err != nil {
+		InternalServerError(w, err.Error())
+		return
+	}
+
 	NoCache(w)
 	w.Header().Set("Content-Type", applicationJSON)
 	w.WriteHeader(http.StatusOK)
 
-	_, err := w.Write(data)
+	_, err = w.Write(bytes)
 	if err != nil {
 		log.Println("Error writing response: %w", err)
 	}
@@ -52,6 +58,7 @@ func ErrorMissingParameter(w http.ResponseWriter, param string) {
 }
 
 func Error(w http.ResponseWriter, e, d string, statusCode int) {
+	log.Printf("Error: %s, Description: %s", e, d)
 	errJSON := map[string]string{
 		"error":             e,
 		"error_description": d,

@@ -1,0 +1,21 @@
+{{define "content"}}
+<form class="form" method="post">
+    <p class="error">
+        {{ if .Error }}⚠️ {{ .Error }}{{ end }}
+    </p>
+    {{ if .Authorized }}
+    <p>✅ Device authorized successfully. You can close this page.</p>
+    {{ else if .Denied }}
+    <p>❌ Device access denied.</p>
+    {{ else }}
+    <p>Enter the code shown on your device:</p>
+    <input name="user_code" type="text" placeholder="XXXX-XXXX" value="{{ .UserCode }}" />
+    {{ if .ClientID }}
+    <p>Client <strong>{{ .ClientID }}</strong> is requesting access{{ if .Scopes }} for: <strong>{{ range .Scopes }}{{ . }} {{ end }}</strong>{{ end }}.</p>
+    <button type="submit" name="action" value="deny">Deny</button>
+    {{ end }}
+    <input type="hidden" name="__csrf" value="{{ .CSRF }}">
+    <button type="submit" name="action" value="approve">Authorize</button>
+    {{ end }}
+</form>
+{{end}}

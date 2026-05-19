@@ -28,10 +28,11 @@ func (ss *sqlSessionStore) NewSession(sessionID string, user domain.User, expire
 		id:         sessionID,
 		userID:     user.ID(),
 		requireMFA: requireMFA,
+		authTime:   time.Now(),
 		expiresAt:  expiresAt,
 	}
 
-	_, err := ss.db.Exec("INSERT INTO sessions VALUES(?,?,?,?);", session.id, session.userID, session.requireMFA, session.expiresAt)
+	_, err := ss.db.Exec("INSERT INTO sessions VALUES(?,?,?,?,?);", session.id, session.userID, session.requireMFA, session.expiresAt, session.authTime)
 	if err != nil {
 		return nil, fmt.Errorf("NewSession: %w", err)
 	}
@@ -42,8 +43,8 @@ func (ss *sqlSessionStore) NewSession(sessionID string, user domain.User, expire
 // GetSessionByID looks up the Session
 func (ss *sqlSessionStore) GetSessionByID(id string) (domain.Session, error) {
 	session := &miniSession{}
-	row := ss.db.QueryRow("SELECT id, userID, expiresAt, requireMFA FROM sessions WHERE id = ?;", id)
-	err := row.Scan(&session.id, &session.userID, &session.expiresAt, &session.requireMFA)
+	row := ss.db.QueryRow("SELECT id, userID, expiresAt, requireMFA, authTime FROM sessions WHERE id = ?;", id)
+	err := row.Scan(&session.id, &session.userID, &session.expiresAt, &session.requireMFA, &session.authTime)
 	if err != nil {
 		return nil, fmt.Errorf("GetSessionByID: %w", err)
 	}
@@ -111,5 +112,5 @@ func (ss *sqlSessionStore) Session(session *miniSession) (domain.Session, error)
 		return nil, fmt.Errorf("Session: %w", err)
 	}
 
-	return domain.NewSession(session.id, user, session.requireMFA, session.expiresAt), nil
+	return domain.NewSession(session.id, user, session.requireMFA, session.authTime, session.expiresAt), nil
 }

@@ -84,10 +84,16 @@ func (ms *miniMFACodeStore) DeleteUserMFACodes(userID string) {
 	ms.Range(func(key, value interface{}) bool {
 		mfaCode := value.(*miniMFACode)
 		if mfaCode.userID == userID {
-			ms.Delete(mfaCode.id)
+			ms.Map.Delete(mfaCode.id)
 		}
 		return true
 	})
+}
+
+// DeleteMFACode deletes a single MFACode by its id
+func (ms *miniMFACodeStore) DeleteMFACode(id string) error {
+	ms.Map.Delete(id)
+	return nil
 }
 
 // MFACode converts a miniMFACode to a MFACode

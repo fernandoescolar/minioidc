@@ -1,8 +1,8 @@
 package handlers
 
 import (
-	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/fernandoescolar/minioidc/internal/api/utils"
 	"github.com/fernandoescolar/minioidc/pkg/cryptography"
@@ -14,9 +14,9 @@ var (
 		"client_credentials",
 		"password",
 		"refresh_token",
-		// "urn:ietf:params:oauth:grant-type:jwt-bearer",
+		"urn:ietf:params:oauth:grant-type:jwt-bearer",
+		"urn:ietf:params:oauth:grant-type:device_code",
 		// "urn:ietf:params:oauth:grant-type:saml2-bearer",
-		// "urn:ietf:params:oauth:grant-type:device_code",
 		// "urn:ietf:params:oauth:grant-type:token-exchange",
 	}
 	ResponseTypesSupported = []string{
@@ -64,19 +64,27 @@ var (
 )
 
 type DiscoveryHandler struct {
-	issuer                string
-	authorizationEndpoint string
-	tokenEndpoint         string
-	jwksEndpoint          string
-	userinfoEndpoint      string
+	issuer                      string
+	authorizationEndpoint       string
+	tokenEndpoint               string
+	jwksEndpoint                string
+	userinfoEndpoint            string
+	introspectionEndpoint       string
+	revocationEndpoint          string
+	endSessionEndpoint          string
+	deviceAuthorizationEndpoint string
 }
 
 type discoveryResponse struct {
-	Issuer                string `json:"issuer"`
-	AuthorizationEndpoint string `json:"authorization_endpoint"`
-	TokenEndpoint         string `json:"token_endpoint"`
-	JWKSUri               string `json:"jwks_uri"`
-	UserinfoEndpoint      string `json:"userinfo_endpoint"`
+	Issuer                      string `json:"issuer"`
+	AuthorizationEndpoint       string `json:"authorization_endpoint"`
+	TokenEndpoint               string `json:"token_endpoint"`
+	JWKSUri                     string `json:"jwks_uri"`
+	UserinfoEndpoint            string `json:"userinfo_endpoint"`
+	IntrospectionEndpoint       string `json:"introspection_endpoint,omitempty"`
+	RevocationEndpoint          string `json:"revocation_endpoint,omitempty"`
+	EndSessionEndpoint          string `json:"end_session_endpoint,omitempty"`
+	DeviceAuthorizationEndpoint string `json:"device_authorization_endpoint,omitempty"`
 
 	GrantTypesSupported               []string `json:"grant_types_supported"`
 	ResponseTypesSupported            []string `json:"response_types_supported"`
@@ -90,25 +98,34 @@ type discoveryResponse struct {
 
 var _ http.Handler = (*DiscoveryHandler)(nil)
 
-func NewDiscoveryHandler(issuer string, authorizationEndpoint string, tokenEndpoint string, jwksEndpoint string, userinfoEndpoint string) *DiscoveryHandler {
+func NewDiscoveryHandler(issuer, authorizationEndpoint, tokenEndpoint, jwksEndpoint, userinfoEndpoint, introspectionEndpoint, revocationEndpoint, endSessionEndpoint, deviceAuthorizationEndpoint string) *DiscoveryHandler {
 	return &DiscoveryHandler{
-		issuer:                issuer,
-		authorizationEndpoint: authorizationEndpoint,
-		tokenEndpoint:         tokenEndpoint,
-		jwksEndpoint:          jwksEndpoint,
-		userinfoEndpoint:      userinfoEndpoint,
+		issuer:                      issuer,
+		authorizationEndpoint:       authorizationEndpoint,
+		tokenEndpoint:               tokenEndpoint,
+		jwksEndpoint:                jwksEndpoint,
+		userinfoEndpoint:            userinfoEndpoint,
+		introspectionEndpoint:       introspectionEndpoint,
+		revocationEndpoint:          revocationEndpoint,
+		endSessionEndpoint:          endSessionEndpoint,
+		deviceAuthorizationEndpoint: deviceAuthorizationEndpoint,
 	}
 }
 
 // Discovery renders the OIDC discovery document and partial RFC-8414 authorization
 // server metadata hosted at `/.well-known/openid-configuration`.
-func (h *DiscoveryHandler) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
+func (h *DiscoveryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	issuer := h.Issuer(r)
 	discovery := &discoveryResponse{
-		Issuer:                h.Issuer(),
-		AuthorizationEndpoint: h.AuthorizationEndpoint(),
-		TokenEndpoint:         h.TokenEndpoint(),
-		JWKSUri:               h.JWKSEndpoint(),
-		UserinfoEndpoint:      h.UserinfoEndpoint(),
+		Issuer:                      issuer,
+		AuthorizationEndpoint:       h.AuthorizationEndpoint(issuer),
+		TokenEndpoint:               h.TokenEndpoint(issuer),
+		JWKSUri:                     h.JWKSEndpoint(issuer),
+		UserinfoEndpoint:            h.UserinfoEndpoint(issuer),
+		IntrospectionEndpoint:       h.IntrospectionEndpoint(issuer),
+		RevocationEndpoint:          h.RevocationEndpoint(issuer),
+		EndSessionEndpoint:          h.EndSessionEndpoint(issuer),
+		DeviceAuthorizationEndpoint: h.DeviceAuthorizationEndpoint(issuer),
 
 		GrantTypesSupported:               GrantTypesSupported,
 		ResponseTypesSupported:            ResponseTypesSupported,
@@ -120,43 +137,45 @@ func (h *DiscoveryHandler) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 		CodeChallengeMethodsSupported:     CodeChallengeMethodsSupported,
 	}
 
-	resp, err := json.Marshal(discovery)
-	if err != nil {
-		utils.InternalServerError(w, err.Error())
-		return
-	}
-
-	utils.JSON(w, resp)
+	utils.JSON(w, discovery)
 }
 
-func (h *DiscoveryHandler) Issuer() string {
-	return h.issuer
+func (h *DiscoveryHandler) Issuer(r *http.Request) string {
+	return utils.GetIssuer(h.issuer, r)
 }
 
-func (h *DiscoveryHandler) AuthorizationEndpoint() string {
-	return h.issuerWithoutTrailingSlash() + h.authorizationEndpoint
+func (h *DiscoveryHandler) AuthorizationEndpoint(issuer string) string {
+	return issuerWithoutTrailingSlash(issuer) + h.authorizationEndpoint
 }
 
-func (h *DiscoveryHandler) TokenEndpoint() string {
-	return h.issuerWithoutTrailingSlash() + h.tokenEndpoint
+func (h *DiscoveryHandler) TokenEndpoint(issuer string) string {
+	return issuerWithoutTrailingSlash(issuer) + h.tokenEndpoint
 }
 
-func (h *DiscoveryHandler) JWKSEndpoint() string {
-	return h.issuerWithoutTrailingSlash() + h.jwksEndpoint
+func (h *DiscoveryHandler) JWKSEndpoint(issuer string) string {
+	return issuerWithoutTrailingSlash(issuer) + h.jwksEndpoint
 }
 
-func (h *DiscoveryHandler) UserinfoEndpoint() string {
-	return h.issuerWithoutTrailingSlash() + h.userinfoEndpoint
+func (h *DiscoveryHandler) UserinfoEndpoint(issuer string) string {
+	return issuerWithoutTrailingSlash(issuer) + h.userinfoEndpoint
 }
 
-func (h *DiscoveryHandler) issuerWithoutTrailingSlash() string {
-	if len(h.issuer) == 0 {
-		return ""
-	}
+func (h *DiscoveryHandler) IntrospectionEndpoint(issuer string) string {
+	return issuerWithoutTrailingSlash(issuer) + h.introspectionEndpoint
+}
 
-	if h.issuer[len(h.issuer)-1] == '/' {
-		return h.issuer[:len(h.issuer)-1]
-	}
+func (h *DiscoveryHandler) RevocationEndpoint(issuer string) string {
+	return issuerWithoutTrailingSlash(issuer) + h.revocationEndpoint
+}
 
-	return h.issuer
+func (h *DiscoveryHandler) EndSessionEndpoint(issuer string) string {
+	return issuerWithoutTrailingSlash(issuer) + h.endSessionEndpoint
+}
+
+func (h *DiscoveryHandler) DeviceAuthorizationEndpoint(issuer string) string {
+	return issuerWithoutTrailingSlash(issuer) + h.deviceAuthorizationEndpoint
+}
+
+func issuerWithoutTrailingSlash(issuer string) string {
+	return strings.TrimRight(issuer, "/")
 }

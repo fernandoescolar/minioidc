@@ -55,6 +55,8 @@ type Config struct {
 	UserStore UserStore
 	// is the store used to save MFA codes.
 	MFACodeStore MFACodeStore
+	// is the store used to save device codes.
+	DeviceCodeStore DeviceCodeStore
 
 	// is the filepath of the base template.
 	BaseTemplateFilepath string
@@ -64,4 +66,12 @@ type Config struct {
 	MFACreateTemplateFilepath string
 	// the filepath of the MFA template.
 	MFAVerifyTemplateFilepath string
+	// the filepath of the device activation template.
+	DeviceTemplateFilepath string
+	// the filepath of the user profile template.
+	ProfileTemplateFilepath string
+	// the filepath of the change-password template.
+	ProfilePasswordTemplateFilepath string
+	// the filepath of the MFA management template.
+	ProfileMFATemplateFilepath string
 }

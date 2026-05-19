@@ -41,7 +41,7 @@ func (h *TokenHandler) passwordGrant(tokenReq *tokenRequest, w http.ResponseWrit
 	}
 
 	if !client.ScopesAreValid(tokenReq.Scopes) {
-		utils.Error(w, utils.InvalidScope, "Invalid scope", http.StatusUnauthorized)
+		utils.Error(w, utils.InvalidScope, "Invalid scope", http.StatusBadRequest)
 		return nil
 	}
 
@@ -51,17 +51,28 @@ func (h *TokenHandler) passwordGrant(tokenReq *tokenRequest, w http.ResponseWrit
 		return nil
 	}
 
-	id := stores.CreateComplexUID()
-	session := domain.NewSession(id, user, false, h.now().Add(h.accessTTL))
+	sessionID := stores.CreateComplexUID()
+	session, err := h.sessionStore.NewSession(sessionID, user, h.now().Add(h.accessTTL), false)
+	if err != nil {
+		utils.InternalServerError(w, err.Error())
+		return nil
+	}
 
-	return domain.NewGrant(
-		id,
-		domain.GrantTypeCode,
+	grantID := stores.CreateComplexUID()
+	grant, err := h.grantStore.NewCodeGrant(
+		grantID,
 		client,
 		session,
+		h.now(),
 		h.now().Add(h.accessTTL),
 		tokenReq.Scopes,
 		"",
 		"",
 		"")
+	if err != nil {
+		utils.InternalServerError(w, err.Error())
+		return nil
+	}
+
+	return grant
 }

@@ -1,233 +1,248 @@
 # minioidc
 
-minioidc is a lightweight OpenID Connect (OIDC) server designed to provide Single Sign-On (SSO) functionality for small or home networks. While not a complete OIDC implementation, minioidc currently supports the following grant types:
+[![Go](https://img.shields.io/badge/go-1.26.3+-00ADD8?logo=go)](https://go.dev/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-- *Authorization Code with PKCE*: Securely obtain an authorization code using Proof Key for Code Exchange (PKCE).
-- *Refresh Token*: Extend the validity of access tokens using refresh tokens.
-- *Client Credentials*: Authenticate clients using client credentials.
-- *Password*: Authenticate users using their username and password.
-- *Implicit*: Obtain tokens directly from the authorization endpoint.
-- *Hybrid*: Combine the authorization code and implicit flows.
+minioidc is a lightweight OpenID Connect (OIDC) / OAuth 2.0 authorization server designed to provide Single Sign-On (SSO) functionality for small or home networks. It is not a complete OIDC implementation, but covers the most common grant types and endpoints.
+
+Supported grant types:
+
+| Grant type | RFC |
+|---|---|
+| Authorization Code + PKCE | [RFC 7636](https://datatracker.ietf.org/doc/html/rfc7636) |
+| Implicit | [OpenID Connect Core §3.2](https://openid.net/specs/openid-connect-core-1_0.html) |
+| Hybrid | [OpenID Connect Core §3.3](https://openid.net/specs/openid-connect-core-1_0.html) |
+| Refresh Token | [RFC 6749 §6](https://datatracker.ietf.org/doc/html/rfc6749#section-6) |
+| Client Credentials | [RFC 6749 §4.4](https://datatracker.ietf.org/doc/html/rfc6749#section-4.4) |
+| Resource Owner Password | [RFC 6749 §4.3](https://datatracker.ietf.org/doc/html/rfc6749#section-4.3) |
+| Device Code | [RFC 8628](https://datatracker.ietf.org/doc/html/rfc8628) |
+| JWT Bearer | [RFC 7523](https://datatracker.ietf.org/doc/html/rfc7523) |
 
 ## Features
 
-- **Simple and Lightweight**: minioidc is designed to be a straightforward solution for enabling SSO in small or home networks.
-- **Client and User Configuration**: Easily configure client and user data directly in the YAML configuration file.
-- **Flexible Data Storage**: Store grant and session data in memory or use a SQLite v3 database for more persistent storage.
-- **LDAP Users Integration**: Use LDAP users to login.
-- **MFA**: Require MFA for all users using TOTP App (e.g. Google Authenticator).
-- **Secure by Default**: Enable HTTP Strict Transport Security (HSTS), Content Security Policy (CSP), secure cookies, and more with a single configuration option.
+- **Simple and Lightweight** — designed to be a straightforward SSO solution for small or home networks.
+- **All major OAuth 2.0 grant types** — including Device Code (RFC 8628) and JWT Bearer (RFC 7523).
+- **OIDC Discovery + JWKS** — fully compliant `/.well-known/openid-configuration` and JWKS endpoint.
+- **Token Revocation** — RFC 7009 revocation endpoint for access and refresh tokens.
+- **RP-Initiated Logout** — OIDC end session endpoint with `post_logout_redirect_uri` support.
+- **Introspection** — RFC 7662 token introspection endpoint.
+- **PKCE enforcement** — required for public clients (no secret).
+- **at_hash / c_hash** — correct computation in ID tokens for implicit and hybrid flows.
+- **Client and User Configuration** — configure clients and users directly in the YAML file.
+- **Flexible Data Storage** — in-memory (default) or SQLite v3 for grants, sessions and MFA.
+- **LDAP Users** — plug in an LDAP directory as the user store.
+- **MFA** — TOTP-based MFA (e.g. Google Authenticator / Authy) per user.
+- **Customisable Templates** — override any HTML page with your own `html/template` files.
+- **Secure by Default** — HSTS, CSP, secure cookies, forwarded-header support, all opt-in via config.
 
-## Roadmap
+## Requirements
 
-The following features are planned for future releases:
+- Go 1.22 or later (for running from source or using as a library)
+- Docker (optional, for the containerised setup)
 
-- [x] OIDC Discovery endpoint with JWKS
-- [x] Authorization endpoint
-  - [x] Authorization Code with PKCE
-  - [x] Implicit flow
-  - [x] Hybrid flow
-- [ ] Device Code authorization endpoint
-- [x] Token endpoint
-  - [x] Refresh Token
-  - [x] Client Credentials
-  - [x] Password
-- [x] Userinfo endpoint
-- [ ] Introspection endpoint
-- [ ] Revocation endpoint
-- [ ] End session endpoint
-- [x] CSRF
-- [x] Yaml config file
-- [x] ENV secrets inside yaml config file
-- [x] Sqlite database for grants and sessions (and also for MFA)
-- [x] MFA with TOTP App (e.g. Google Authenticator)
-- [ ] MFA with email?
-- [x] Ldap Users integration
-- [ ] Change password
-- [ ] Forgot password
-- [ ] MFAs management
-- [ ] MongoDB database for users, clients, grants and sessions (and also for MFA)
-- [ ] Groups or roles
-- [ ] Management API
+## Installation
+
+### From source
+
+```bash
+git clone https://github.com/fernandoescolar/minioidc.git
+cd minioidc
+make build          # produces ./minioidc binary
+```
+
+### Docker
+
+```bash
+make build-docker   # builds the image
+make run-docker     # starts the container on :8000
+```
+
+### As a Go library
+
+```bash
+go get github.com/fernandoescolar/minioidc
+```
 
 ## Getting Started
 
-- You can create a docker image and run it with the following commands:
+1. Copy the example configuration:
 
 ```bash
-make build-docker && make run-docker
+cp example.env .env
+cp example1_config.yml config.yml   # simple in-memory setup
+# or
+cp example2_config.yml config.yml   # SQLite + LDAP setup
 ```
 
-And then visit [http://localhost:8000](http://localhost:8000).
+2. Edit `config.yml` to set your issuer, clients, and users (see [Configuration](#configuration)).
 
-- You can also use the visual studio code launch configuration to run the server in debug mode.
+3. Run the server:
 
-- Or you can call the `make run` command to run the server directly.
+```bash
+MINIOIDC_ADDR=:8000 MINIOIDC_CONFIG=config.yml ./minioidc
+# or
+make run
+```
+
+4. Visit [http://localhost:8000](http://localhost:8000) — the welcome page confirms the server is running.
+
+5. The OIDC discovery document is available at:
+
+```
+http://localhost:8000/.well-known/openid-configuration
+```
+
+## Endpoints
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/.well-known/openid-configuration` | GET | OIDC discovery document |
+| `/.well-known/jwks.json` | GET | JSON Web Key Set |
+| `/connect/authorize` | GET | Authorization endpoint |
+| `/connect/token` | POST | Token endpoint |
+| `/connect/userinfo` | GET / POST | Userinfo endpoint |
+| `/connect/introspect` | POST | Token introspection (RFC 7662) |
+| `/connect/revoke` | POST | Token revocation (RFC 7009) |
+| `/connect/endsession` | GET / POST | RP-Initiated Logout |
+| `/connect/deviceauthorization` | POST | Device authorization (RFC 8628) |
+| `/connect/device` | GET / POST | Device activation page (user-facing) |
+| `/login` | GET / POST | Login page |
+| `/mfa/create` | GET / POST | MFA enrolment page |
+| `/mfa/verify` | GET / POST | MFA verification page |
 
 ## Makefile Commands
 
-There are several commands available in the Makefile:
-
-- `make build` - Build the binary
-- `make run` - Run the binary
-- `make build-docker` - Build the docker image
-- `make run-docker` - Run the docker image
-- `make test` - Run the tests
-- `make clean` - Clean the binary
-- `make lint` - Run the linter
-- `make hash text=plain_text_to_hash` - Generate a hash from a given `text`
+| Command | Description |
+|---|---|
+| `make build` | Build the binary |
+| `make run` | Run the binary |
+| `make build-docker` | Build the Docker image |
+| `make run-docker` | Run the Docker image |
+| `make test` | Run all tests |
+| `make clean` | Remove build artefacts |
+| `make lint` | Run the linter |
+| `make hash text=<plaintext>` | Generate a bcrypt hash for a password or client secret |
 
 ## Configuration
 
-You have to set the following environment variables:
+Set the following environment variables before starting the server:
 
-- `MINIOIDC_ADDR` - The address to listen on (default: `:8000`)
-- `MINIOIDC_CONFIG` - The path to the yaml configuration file
+| Variable | Default | Description |
+|---|---|---|
+| `MINIOIDC_ADDR` | `:8000` | Address and port to listen on |
+| `MINIOIDC_CONFIG` | — | Path to the YAML configuration file (required) |
 
-The configuration file is a yaml file with the following structure:
+### Full configuration reference
 
 ```yaml
 name: My MiniOIDC
-masterkey: 12345678901234567890123456789012
+masterkey: 12345678901234567890123456789012   # AES master key for internal encryption
 issuer: http://example.com
 audience: http://example.com
-require_mfa: true
+require_mfa: false
 reuse_refresh_tokens: false
-private_rsa_key_path: private_key.pem
+private_rsa_key_path: private_key.pem         # omit to generate a random key on startup
+
 middlewares:
-  hsts: true
-  csp: true
-  secure_cookies: true
-  forward_headers: true
-  log_requests: true
+  hsts: true            # HTTP Strict Transport Security
+  csp: true             # Content Security Policy
+  secure_cookies: true  # Secure flag on session cookies
+  forward_headers: true # Trust X-Forwarded-* headers (use behind a reverse proxy)
+  log_requests: true    # Log every request with duration
+
 ttl:
-  access: 20 # minutes
-  refresh: 129600 # 90 days
-  session: 129600 # 90 days
-  code: 5 # minutes
-  csrf: 5 # minutes
+  access: 20        # Access token TTL in minutes (default 20)
+  refresh: 129600   # Refresh token TTL in minutes (default 90 days)
+  session: 129600   # Session TTL in minutes (default 90 days)
+  code: 5           # Authorization / device code TTL in minutes (default 5)
+  csrf: 5           # CSRF token TTL in minutes (default 5)
+
 sqlite:
   filepath: db.sqlite3
   use_in_grants: true
   use_in_sessions: true
   use_in_mfa: true
+
 ldap:
-    server: localhost:389
-    bind: uid=admin,cn=users,dc=example,dc=com
-    password: password
-    base_dn: dc=example,dc=com
-    filter_dn: (&(uid={username})(objectClass=person))
-    attributes:
-      subject: uidNumber
-      name: uid
-      email: mail
-      phone: phone
-      address: address
+  server: localhost:389
+  bind: uid=admin,cn=users,dc=example,dc=com
+  password: password
+  base_dn: dc=example,dc=com
+  filter_dn: (&(uid={username})(objectClass=person))
+  attributes:
+    subject: uidNumber
+    name: uid
+    email: mail
+    phone: phone
+    address: address
+
 templates:
   base: templates/base.html
-  login: templates/login2.html
+  login: templates/login.html
   mfa_create: templates/mfa_create.html
   mfa_verify: templates/mfa_verify.html
+  device: templates/device.html   # Device Code activation page
+
 clients:
   - id: myclient
-    secret_hash: $2a$06$L6/zALdtbkYajjHTZUW29ePBEb/hwhgjhXC4YpHANavvKDJl69ctK # secret
+    secret_hash: $2a$06$L6/zALdtbkYajjHTZUW29ePBEb/hwhgjhXC4YpHANavvKDJl69ctK  # "secret"
     redirect_uris:
-     - http://myapi.com/callback
+      - http://myapi.com/callback
+  - id: publicclient
+    secret_hash: ""   # public client — no secret, PKCE required
+    redirect_uris:
+      - http://myapp.com/callback
+
 users:
-  - subject: 1
-    email: use@mail.com
+  - subject: "1"
+    email: user@mail.com
     email_verified: true
     preferred_username: user
-    password_hash: $2a$06$03dduqc0lMbsb5go/l6RI.cRb03Hos9CMpgm5/yYuRsSQPHtrFwSq # password
+    password_hash: $2a$06$03dduqc0lMbsb5go/l6RI.cRb03Hos9CMpgm5/yYuRsSQPHtrFwSq  # "password"
     phone: +1234567890
     address: 1 Main St. City, State 12345
     groups:
       - admin
 ```
 
-In the root section, you can configure the following settings:
+**Root settings**
 
-- `issuer` - The OIDC issuer
-- `audience` - The OIDC audience
-- `require_mfa` - Whether to require MFA for all users (default: `false`)
-- `reuse_refresh_tokens` - Whether to allow re-use refresh tokens (default: `false`)
-- `private_rsa_key_path` - The path to the private RSA key (if not set, a new random key will be generated)
+| Key | Default | Description |
+|---|---|---|
+| `issuer` | — | OIDC issuer URL (required) |
+| `audience` | — | JWT audience (required) |
+| `require_mfa` | `false` | Enforce TOTP MFA for all users |
+| `reuse_refresh_tokens` | `false` | Allow refresh tokens to be used more than once |
+| `private_rsa_key_path` | — | Path to a PEM-encoded RSA private key; a 2048-bit key is generated if omitted |
 
-In the `middlewares` section, you can activate the following middlewares:
+**`middlewares`**
 
-- `hsts` - Whether to enable HTTP Strict Transport Security (HSTS) (default: `false`)
-- `csp` - Whether to enable Content Security Policy (CSP) (default: `false`)
-- `secure_cookies` - Whether to enable secure cookies (default: `false`)
-- `forward_headers` - Whether to forward headers (default: `false`)
-- `log_requests` - Whether to log requests (default: `false`)
+| Key | Default | Description |
+|---|---|---|
+| `hsts` | `false` | Add `Strict-Transport-Security` header |
+| `csp` | `false` | Add `Content-Security-Policy` header |
+| `secure_cookies` | `false` | Mark session cookie as `Secure` |
+| `forward_headers` | `false` | Trust `X-Forwarded-Proto` / `X-Forwarded-Host` |
+| `log_requests` | `false` | Log each request with method, path, status and duration |
 
-In the `ttl` section, you can configure the following TTLs:
+**`ttl`** — all values are in **minutes**
 
-- `access` - The access token TTL in minutes (default: `20`)
-- `refresh` - The refresh token TTL in minutes (default: `129600`, 90 days)
-- `session` - The session TTL in minutes (default: `129600`, 90 days)
-- `code` - The authorization code TTL in minutes (default: `5`)
-- `csrf` - The CSRF token TTL in minutes (default: `5`)
+**`sqlite`** — omit the section entirely to use in-memory stores
 
-In the `sqlite` section, you can configure the following SQLite settings:
+**`ldap`** — if set, the `users` section is ignored
 
-- `filepath` - The path to the SQLite database file. It is mandatory if `use_in_grants` or `use_in_sessions` is set to `true`.
-- `use_in_grants` - Whether to use the SQLite database for storing grant data (default: `false`)
-- `use_in_sessions` - Whether to use the SQLite database for storing session data (default: `false`)
-- `use_in_mfa` - Whether to use the SQLite database for storing MFA data (default: `false`)
+> Static assets (CSS, JS, images) go in the `static/` directory and are served at `/static/`.
+> Reference them from templates as `<link rel="stylesheet" href="/static/styles.css">`.
 
-In the `ldap` section, you can configure the LDAP user store settings:
-
-- `server` - The LDAP server address
-- `bind` - The LDAP bind DN
-- `password` - The LDAP bind password
-- `base_dn` - The LDAP base DN
-- `filter_dn` - The LDAP filter DN
-- `attributes` - The LDAP attributes to use for each user property
-- `attributes.subject` - The LDAP attribute to use for the user subject
-- `attributes.name` - The LDAP attribute to use for the user name
-- `attributes.email` - The LDAP attribute to use for the user email
-- `attributes.phone` - The LDAP attribute to use for the user phone
-- `attributes.address` - The LDAP attribute to use for the user address
-
-> If you use LDAP users, you can not configure the `users` section in the yaml configuration file.
-
-In the `templates` section, you can configure the following html/templates:
-
-- `base` - The base template
-- `login` - The login page template
-- `mfa_create` - The MFA create page template
-- `mfa_verify` - The MFA verify page template
-
-> you can add your static files (like css, js, images, ...) in the `static` folder and use them in your templates (e.g. `<link rel="stylesheet" href="/static/css/style.css">`
-
-Seed data is provided in the `clients` and `users` sections. In the `clients` section, you can create the OIDC clients to use in the auth challenge. Each client has the following properties:
-
-- `id` - The client ID
-- `secret_hash` - The client secret hash (use the `make hash` command to generate a hash)
-- `redirect_uris` - The list of allowed redirect URIs
-
-In the `users` section, you can create the users to login. Each user has the following properties:
-
-- `subject` - The user subject
-- `email` - The user email
-- `email_verified` - Whether the user email is verified
-- `preferred_username` - The user preferred username (the username used for login)
-- `password_hash` - The user password hash (use the `make hash` command to generate a hash)
-- `phone` - The user phone number
-- `address` - The user address
-- `groups` - The list of user groups
-
-The yaml configuration file can also reference environment variables. You can use the following syntax to use environment variables in your yaml configuration file:
+Environment variable substitution is supported anywhere in the YAML:
 
 ```yaml
-value1: ${ENV_VAR}
-value2: $OTHER_ENV_VAR
+masterkey: ${MINIOIDC_MASTER_KEY}
+ldap:
+  password: $LDAP_PASSWORD
 ```
 
 ## Use in your projects
-
-You can use the `minioidc` package in your projects to add OIDC authentication to your web applications:
 
 ```go
 package main
@@ -241,12 +256,12 @@ import (
 
 func main() {
 	builder := &api.Builder{
-		Audience: "https://api.example.com",
 		Issuer:   "https://minioidc.example.com",
+		Audience: "https://api.example.com",
 		Clients: []api.Client{
 			{
 				ID:           "myclient",
-				SecretHash:   "$2a$06$L6/zALdtbkYajjHTZUW29ePBEb/hwhgjhXC4YpHANavvKDJl69ctK", // secret
+				SecretHash:   "$2a$06$L6/zALdtbkYajjHTZUW29ePBEb/hwhgjhXC4YpHANavvKDJl69ctK", // "secret"
 				RedirectURIs: []string{"https://api.example.com/callback"},
 			},
 		},
@@ -254,12 +269,12 @@ func main() {
 			{
 				Subject:           "0000001",
 				PreferredUsername: "user",
-				PasswordHash:      "$2a$06$03dduqc0lMbsb5go/l6RI.cRb03Hos9CMpgm5/yYuRsSQPHtrFwSq", // password
+				PasswordHash:      "$2a$06$03dduqc0lMbsb5go/l6RI.cRb03Hos9CMpgm5/yYuRsSQPHtrFwSq", // "password"
 			},
 		},
 	}
 
-	minioidc, err := builder.Build(config)
+	minioidc, err := builder.Build()
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -267,68 +282,144 @@ func main() {
 	mux := http.NewServeMux()
 	handler := minioidc.Wrap(mux)
 
-	log.Printf("Listening http://localhost:8000")
-	err = http.ListenAndServe(":8000", handler)
-	if err != nil && err != http.ErrServerClosed {
+	log.Println("Listening on http://localhost:8000")
+	if err := http.ListenAndServe(":8000", handler); err != nil && err != http.ErrServerClosed {
 		log.Fatal(err)
 	}
 }
 ```
 
-The builder has the following fields:
+### Builder fields
 
-- `Name string` - Set the OIDC name (default: `minioidc`)
-- `MasterKey string` - Set the OIDC master key use to encrypt and decrypt internal data (if not set, a new random key will be generated)
-- `Audience string` - Set the OIDC audience (it is MANADATORY)
-- `Issuer string` - Set the OIDC issuer (it is MANADATORY)
-- `RequireMFA bool` - Set whether to require MFA for all users (default: `false`)
-- `ReuseRefreshTokens bool` - Set whether to allow re-use refresh tokens (default: `false`)
-- `UseHSTS bool` - Set whether to enable HTTP Strict Transport Security (HSTS) (default: `false`)
-- `UseCSP bool` - Set whether to enable Content Security Policy (CSP) (default: `false`)
-- `UseSecureCookie bool` - Set whether to enable secure cookies (default: `false`)
-- `UseForwardedHeaders bool` - Set whether to forward headers (default: `false`)
-- `LogRequests bool` - Set whether to log requests (default: `false`)
-- `Clients []Client` - Set the OIDC clients
-- `Users []User` - Set the OIDC users
-- `PrivateKey *rsa.PrivateKey` - Set the OIDC private key
-- `PrivateKeyFile string` - Set the OIDC private key from a file
-- `AccessTTL time.Duration` - Set the access token TTL
-- `RefreshTTL time.Duration` - Set the refresh token TTL
-- `SessionTTL time.Duration` - Set the session TTL
-- `CodeTTL time.Duration` - Set the authorization code TTL
-- `CSRFTTL time.Duration` - Set the CSRF token TTL
-- `ClientStore ClientStore` - Set the client store
-- `UserStore UserStore` - Set the user store
-- `GrantStore GrantStore` - Set the grant store
-- `SessionStore SessionStore` - Set the session store
-- `MFAStore MFAStore` - Set the MFA store
-- `BaseTemplate string` - Set the base template
-- `LoginTemplate string` - Set the login template
-- `MFACreateTemplate string` - Set the MFA create template
-- `MFAVerifyTemplate string` - Set the MFA verify template
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `Name` | `string` | `"minioidc"` | Display name shown on login/device pages |
+| `MasterKey` | `string` | random | AES key for internal encryption (auto-generated if empty) |
+| `Issuer` | `string` | — | OIDC issuer URL **(required)** |
+| `Audience` | `string` | — | JWT audience **(required)** |
+| `RequireMFA` | `bool` | `false` | Enforce TOTP MFA for all users |
+| `ReuseRefreshTokens` | `bool` | `false` | Allow reuse of refresh tokens |
+| `PrivateRSAKey` | `*rsa.PrivateKey` | — | RSA private key (generated if neither key nor filepath is set) |
+| `PrivateRSAKeyFilepath` | `string` | — | Path to a PEM RSA private key file |
+| `UseHSTS` | `bool` | `false` | Enable HSTS middleware |
+| `UseCSP` | `bool` | `false` | Enable CSP middleware |
+| `UseSecureCookie` | `bool` | `false` | Set `Secure` flag on cookies |
+| `UseForwardedHeaders` | `bool` | `false` | Trust `X-Forwarded-*` headers |
+| `LogRequests` | `bool` | `false` | Log all HTTP requests |
+| `AccessTTL` | `time.Duration` | 20 min | Access token lifetime |
+| `RefreshTTL` | `time.Duration` | 90 days | Refresh token lifetime |
+| `SessionTTL` | `time.Duration` | 90 days | Session cookie lifetime |
+| `CodeTTL` | `time.Duration` | 5 min | Authorization / device code lifetime |
+| `CSRFTTL` | `time.Duration` | 5 min | CSRF token lifetime |
+| `BaseTemplateFilepath` | `string` | `templates/base.html` | Base layout template |
+| `LoginTemplateFilepath` | `string` | `templates/login.html` | Login page template |
+| `MFACreateTemplateFilepath` | `string` | `templates/mfa_create.html` | MFA enrolment template |
+| `MFAVerifyTemplateFilepath` | `string` | `templates/mfa_verify.html` | MFA verification template |
+| `DeviceTemplateFilepath` | `string` | `templates/device.html` | Device Code activation template |
+| `ClientStore` | `domain.ClientStore` | in-memory | Custom client store implementation |
+| `UserStore` | `domain.UserStore` | in-memory | Custom user store implementation |
+| `GrantStore` | `domain.GrantStore` | in-memory | Custom grant store implementation |
+| `SessionStore` | `domain.SessionStore` | in-memory | Custom session store implementation |
+| `MFACodeStore` | `domain.MFACodeStore` | in-memory | Custom MFA code store implementation |
+| `DeviceCodeStore` | `domain.DeviceCodeStore` | in-memory | Custom device code store implementation |
+| `Clients` | `[]Client` | — | Seed clients |
+| `Users` | `[]User` | — | Seed users |
 
-And the builder has the following methods:
+### Builder methods
 
-- `UseSQLite(string, SqliteDatabases)` - Set the SQLite database file path and databases to use (flags: `NoSqliteDatabases`, `Grants`, `Sessions` or `MFA`)
-- `UseLDAP(string, LDAPConfig)` - Set the LDAP server address and LDAP config to use
+| Method | Description |
+|---|---|
+| `UseSQLite(filepath string, databases SqliteDatabases)` | Persist grants, sessions and/or MFA in a SQLite file. Flags: `Grants`, `Sessions`, `MFA`, `All`. |
+| `UseLDAP(server string, config LDAPConfig)` | Use an LDAP directory as the user store. |
 
-The `LDAPConfig` struct has the following fields:
+### LDAPConfig fields
 
-- `Bind string` - The LDAP bind DN
-- `Password string` - The LDAP bind password
-- `BaseDN string` - The LDAP base DN
-- `FilterDN string` - The LDAP filter DN
-- `SubjectAttribute string` - The LDAP attribute to use for the user subject
-- `NameAttribute string` - The LDAP attribute to use for the user name
-- `EmailAttribute string` - The LDAP attribute to use for the user email
-- `PhoneAttribute string` - The LDAP attribute to use for the user phone
-- `AddressAttribute string` - The LDAP attribute to use for the user address
+| Field | Description |
+|---|---|
+| `Bind` | LDAP bind DN |
+| `Password` | LDAP bind password |
+| `BaseDN` | Base DN for user searches |
+| `FilterDN` | Search filter; use `{username}` as placeholder |
+| `SubjectAttribute` | Attribute mapped to `sub` claim |
+| `NameAttribute` | Attribute mapped to `preferred_username` |
+| `EmailAttribute` | Attribute mapped to `email` |
+| `PhoneAttribute` | Attribute mapped to `phone_number` |
+| `AddressAttribute` | Attribute mapped to `address` |
+
+## Roadmap
+
+- [x] OIDC Discovery endpoint with JWKS
+- [x] Authorization endpoint
+  - [x] Authorization Code with PKCE
+  - [x] Implicit flow
+  - [x] Hybrid flow
+- [x] Device Code authorization endpoint (RFC 8628)
+- [x] Token endpoint
+  - [x] Refresh Token
+  - [x] Client Credentials
+  - [x] Password
+  - [x] JWT Bearer (RFC 7523)
+  - [x] Device Code (RFC 8628)
+- [x] Userinfo endpoint
+- [x] Introspection endpoint
+- [x] Revocation endpoint (RFC 7009)
+- [x] End session endpoint (RP-Initiated Logout)
+- [x] CSRF protection
+- [x] YAML config file with ENV variable substitution
+- [x] SQLite database for grants, sessions and MFA
+- [x] MFA with TOTP (e.g. Google Authenticator)
+- [x] LDAP users integration
+- [ ] MFA via email
+- [ ] Change password
+- [ ] Forgot password
+- [ ] MFA management UI
+- [ ] MongoDB store
+- [ ] Groups / roles
+- [ ] Management API
+
+## Testing
+
+Run the full test suite:
+
+```bash
+make test
+# or
+go test ./... -timeout 120s
+```
+
+Run only the integration tests:
+
+```bash
+go test ./tests/integration/... -v -timeout 120s
+```
+
+Run a specific subset:
+
+```bash
+go test ./tests/integration/... -run "Test_DeviceCode|Test_JWTBearer" -v
+```
+
+## Security
+
+minioidc is intended for **small / home networks** and has not undergone a formal security audit. For production use, please review the following:
+
+- Always run behind a TLS-terminating reverse proxy (nginx, Caddy, Traefik) and enable `secure_cookies: true` and `hsts: true`.
+- Use a strong, random `masterkey` (32+ bytes) and keep it secret.
+- Rotate the RSA private key periodically; store it outside the repository.
+- Public clients (no `secret_hash`) **require PKCE** — this is enforced by the server.
+- Refresh tokens and device codes are single-use by default.
+
+To report a vulnerability, please open a GitHub issue marked **[SECURITY]** or contact the maintainer directly.
 
 ## Contributing
 
+Contributions are welcome. Please:
+
+1. Fork the repository and create a feature branch.
+2. Add tests for any new functionality.
+3. Run `make lint` and `make test` and ensure both pass.
+4. Open a pull request with a clear description of the change.
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details
-
-
+This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.

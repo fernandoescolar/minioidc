@@ -46,16 +46,21 @@ type Builder struct {
 	CodeTTL    time.Duration
 	CSRFTTL    time.Duration
 
-	BaseTemplateFilepath      string
-	LoginTemplateFilepath     string
-	MFACreateTemplateFilepath string
-	MFAVerifyTemplateFilepath string
+	BaseTemplateFilepath            string
+	LoginTemplateFilepath           string
+	MFACreateTemplateFilepath       string
+	MFAVerifyTemplateFilepath       string
+	DeviceTemplateFilepath          string
+	ProfileTemplateFilepath         string
+	ProfilePasswordTemplateFilepath string
+	ProfileMFATemplateFilepath      string
 
-	ClientStore  domain.ClientStore
-	GrantStore   domain.GrantStore
-	SessionStore domain.SessionStore
-	UserStore    domain.UserStore
-	MFACodeStore domain.MFACodeStore
+	ClientStore     domain.ClientStore
+	GrantStore      domain.GrantStore
+	SessionStore    domain.SessionStore
+	UserStore       domain.UserStore
+	MFACodeStore    domain.MFACodeStore
+	DeviceCodeStore domain.DeviceCodeStore
 
 	sqliteFilepath      string
 	sqliteUseInGrants   bool
@@ -156,12 +161,12 @@ func (b *Builder) Build() (*Minioidc, error) {
 }
 
 func (b *Builder) validate() error {
-	if b.Issuer == "" {
-		return errors.New("issuer is required")
-	}
-	if b.Audience == "" {
-		return errors.New("audience is required")
-	}
+	// if b.Issuer == "" {
+	// 	return errors.New("issuer is required")
+	// }
+	// if b.Audience == "" {
+	// 	return errors.New("audience is required")
+	// }
 	if b.PrivateRSAKeyFilepath != "" && b.PrivateRSAKey != nil {
 		return errors.New("private key and private key filepath are mutually exclusive")
 	}
@@ -266,6 +271,18 @@ func (b *Builder) assignDefaults() error {
 	if b.MFAVerifyTemplateFilepath == "" {
 		b.MFAVerifyTemplateFilepath = "templates/mfa_verify.html"
 	}
+	if b.DeviceTemplateFilepath == "" {
+		b.DeviceTemplateFilepath = "templates/device.html"
+	}
+	if b.ProfileTemplateFilepath == "" {
+		b.ProfileTemplateFilepath = "templates/profile.html"
+	}
+	if b.ProfilePasswordTemplateFilepath == "" {
+		b.ProfilePasswordTemplateFilepath = "templates/profile_password.html"
+	}
+	if b.ProfileMFATemplateFilepath == "" {
+		b.ProfileMFATemplateFilepath = "templates/profile_mfa.html"
+	}
 
 	return nil
 }
@@ -291,10 +308,14 @@ func (b *Builder) config() (*domain.Config, error) {
 		CodeTTL:    b.CodeTTL,
 		CSRFTTL:    b.CSRFTTL,
 
-		BaseTemplateFilepath:      b.BaseTemplateFilepath,
-		LoginTemplateFilepath:     b.LoginTemplateFilepath,
-		MFACreateTemplateFilepath: b.MFACreateTemplateFilepath,
-		MFAVerifyTemplateFilepath: b.MFAVerifyTemplateFilepath,
+		BaseTemplateFilepath:            b.BaseTemplateFilepath,
+		LoginTemplateFilepath:           b.LoginTemplateFilepath,
+		MFACreateTemplateFilepath:       b.MFACreateTemplateFilepath,
+		MFAVerifyTemplateFilepath:       b.MFAVerifyTemplateFilepath,
+		DeviceTemplateFilepath:          b.DeviceTemplateFilepath,
+		ProfileTemplateFilepath:         b.ProfileTemplateFilepath,
+		ProfilePasswordTemplateFilepath: b.ProfilePasswordTemplateFilepath,
+		ProfileMFATemplateFilepath:      b.ProfileMFATemplateFilepath,
 	}
 
 	if err := b.assignPrivateKey(config); err != nil {
@@ -410,11 +431,19 @@ func (b *Builder) assignStores(config *domain.Config) error {
 		mfaStore = b.MFACodeStore
 	}
 
+	var deviceCodeStore domain.DeviceCodeStore
+	if b.DeviceCodeStore == nil {
+		deviceCodeStore = stores.NewDeviceCodeStore()
+	} else {
+		deviceCodeStore = b.DeviceCodeStore
+	}
+
 	config.ClientStore = clientStore
 	config.GrantStore = grantStore
 	config.SessionStore = sessionStore
 	config.UserStore = userStore
 	config.MFACodeStore = mfaStore
+	config.DeviceCodeStore = deviceCodeStore
 
 	return nil
 }

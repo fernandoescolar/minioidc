@@ -93,6 +93,26 @@ func (us *miniUserStore) DeleteUser(id string) {
 	us.Delete(id)
 }
 
+// UpdatePassword updates the stored password hash for a user
+func (us *miniUserStore) UpdatePassword(userID, passwordHash string) error {
+	v, ok := us.Load(userID)
+	if !ok {
+		return errors.New("user not found")
+	}
+	u := v.(*miniUser)
+	updated := &miniUser{
+		subject:           u.subject,
+		email:             u.email,
+		preferredUsername: u.preferredUsername,
+		phone:             u.phone,
+		address:           u.address,
+		groups:            u.groups,
+		passwordHash:      passwordHash,
+	}
+	us.Store(userID, updated)
+	return nil
+}
+
 func (u *miniUser) User() domain.User {
 	return domain.NewUser(u.subject, u.email, u.preferredUsername, u.phone, u.address, u.groups, u.passwordHash)
 }

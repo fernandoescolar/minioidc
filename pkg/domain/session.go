@@ -18,20 +18,23 @@ type Session interface {
 	User() User
 	MFARequired() bool
 	HasExpired() bool
+	AuthTime() time.Time
 }
 
 type session struct {
 	id         string
 	user       User
 	requireMFA bool
+	authTime   time.Time
 	expiresAt  time.Time
 }
 
-func NewSession(sessionID string, user User, requireMFA bool, expiresAt time.Time) Session {
+func NewSession(sessionID string, user User, requireMFA bool, authTime time.Time, expiresAt time.Time) Session {
 	return Session(&session{
 		id:         sessionID,
 		user:       user,
 		requireMFA: requireMFA,
+		authTime:   authTime,
 		expiresAt:  expiresAt,
 	})
 }
@@ -50,4 +53,8 @@ func (s *session) MFARequired() bool {
 
 func (s *session) HasExpired() bool {
 	return time.Now().After(s.expiresAt)
+}
+
+func (s *session) AuthTime() time.Time {
+	return s.authTime
 }

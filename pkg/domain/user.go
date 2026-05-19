@@ -1,8 +1,6 @@
 package domain
 
 import (
-	"encoding/json"
-
 	"github.com/fernandoescolar/minioidc/pkg/cryptography"
 	"github.com/golang-jwt/jwt"
 )
@@ -11,12 +9,13 @@ type UserStore interface {
 	NewUser(subject, email, preferredUsername, phone, address string, groups []string, passwordHash string) (User, error)
 	GetUserByID(id string) (User, error)
 	GetUserByUsernameAndPassword(username string, password string) (User, error)
+	UpdatePassword(userID, passwordHash string) error
 }
 
 type User interface {
 	ID() string
 	Username() string
-	Userinfo([]string) ([]byte, error)
+	Userinfo([]string) (interface{}, error)
 	Claims([]string, *IDTokenClaims) (jwt.Claims, error)
 	PasswordIsValid(string) bool
 }
@@ -34,6 +33,7 @@ type user struct {
 }
 
 type miniUserinfo struct {
+	Sub               string   `json:"sub,omitempty"`
 	Email             string   `json:"email,omitempty"`
 	PreferredUsername string   `json:"preferred_username,omitempty"`
 	Phone             string   `json:"phone_number,omitempty"`
@@ -62,18 +62,17 @@ func (u *user) Username() string {
 	return u.Email
 }
 
-func (u *user) Userinfo(scope []string) ([]byte, error) {
+func (u *user) Userinfo(scope []string) (interface{}, error) {
 	user := u.scopedClone(scope)
 
-	info := &miniUserinfo{
+	return &miniUserinfo{
+		Sub:               u.Subject,
 		Email:             user.Email,
 		PreferredUsername: user.PreferredUsername,
 		Phone:             user.Phone,
 		Address:           user.Address,
 		Groups:            user.Groups,
-	}
-
-	return json.Marshal(info)
+	}, nil
 }
 
 type miniClaims struct {

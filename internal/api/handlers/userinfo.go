@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -63,26 +62,9 @@ func (h *UserinfoHandler) authorizeBearer(w http.ResponseWriter, r *http.Request
 }
 
 func (h *UserinfoHandler) authorizeToken(t string, w http.ResponseWriter) (*jwt.Token, bool) {
-	token, err := h.keypair.VerifyJWT(t)
-	if err != nil {
-		utils.Error(w, utils.InvalidRequest, fmt.Sprintf("Invalid token: %v", err), http.StatusUnauthorized)
-		return nil, false
-	}
-
-	claims, ok := token.Claims.(jwt.MapClaims)
+	token, ok := utils.ValidateJWT(t, h.keypair, h.now())
 	if !ok {
-		utils.InternalServerError(w, "Unable to extract token claims")
-		return nil, false
-	}
-
-	exp, ok := claims["exp"].(float64)
-	if !ok {
-		utils.InternalServerError(w, "Unable to extract token expiration")
-		return nil, false
-	}
-
-	if h.now().Unix() > int64(exp) {
-		utils.Error(w, utils.InvalidRequest, "The token is expired", http.StatusUnauthorized)
+		utils.Error(w, utils.InvalidRequest, "Invalid token", http.StatusUnauthorized)
 		return nil, false
 	}
 

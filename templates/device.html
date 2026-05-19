@@ -1,8 +1,6 @@
 {{define "content"}}
 <form class="form" method="post">
-    <p class="error">
-        {{ if .Error }}⚠️ {{ .Error }}{{ end }}
-    </p>
+    <p class="error">{{- if .Error }}⚠️ {{ .Error }}{{ end -}}</p>
     {{ if .Authorized }}
     <p>✅ Device authorized successfully. You can close this page.</p>
     {{ else if .Denied }}

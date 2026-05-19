@@ -29,11 +29,7 @@
     <h3>Add Authenticator</h3>
     <p>Scan this QR code using your authenticator app:</p>
     <div id="qrcode" data-qr="{{.QRCode}}"></div>
-    <p class="error">
-        {{ if .InvalidCode }}
-        ⚠️ Invalid verification code
-        {{ end }}
-    </p>
+    <p class="error">{{- if .InvalidCode }}⚠️ Invalid verification code{{ end -}}</p>
     <form class="form" method="post">
         <p>Enter the code shown in your app to confirm:</p>
         <div class="otp-wrapper">

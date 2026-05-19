@@ -3,12 +3,8 @@
     <p>Scan this QR using your favorite auth app:</p>
     <div id="qrcode" data-qr="{{.QRCode}}"></div>
     <p class="error">
-        {{ if .InvalidVerificationCode }}
-        ⚠️ Invalid verification code
-        {{ end }}
-        {{ if .UnknownError }}
-        ☢️ Error. Try it again later or contact the administrator.
-        {{ end }}
+        {{- if .InvalidVerificationCode }}⚠️ Invalid verification code{{ end }}
+        {{- if .UnknownError }}☢️ Error. Try it again later or contact the administrator.{{ end -}}
     </p>
     <p>Verify the code your auth app is showing:</p>
     <div class="otp-wrapper">

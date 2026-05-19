@@ -1,12 +1,8 @@
 {{define "content"}}
 <form class="form" method="post">
     <p class="error">
-        {{ if .InvalidVerificationCode }}
-        ⚠️ Invalid verification code
-        {{ end }}
-        {{ if .UnknownError }}
-        ☢️ Error. Try it again later or contact the administrator.
-        {{ end }}
+        {{- if .InvalidVerificationCode }}⚠️ Invalid verification code{{ end }}
+        {{- if .UnknownError }}☢️ Error. Try it again later or contact the administrator.{{ end -}}
     </p>
     <div class="otp-wrapper">
         <input

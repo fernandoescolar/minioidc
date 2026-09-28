@@ -2,8 +2,10 @@ package middlewares
 
 import (
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/base64"
 	"fmt"
+	"mime"
 	"net/http"
 	"strconv"
 	"strings"
@@ -14,8 +16,10 @@ import (
 	"github.com/fernandoescolar/minioidc/pkg/domain"
 )
 
+// CSRF implements the double submit cookie pattern: a random value is stored
+// in a cookie and the forms send an encrypted and timestamped copy of it.
 type CSRF struct {
-	active       bool
+	now          func() time.Time
 	securecookie bool
 	masterKey    string
 	ttl          time.Duration
@@ -23,9 +27,9 @@ type CSRF struct {
 
 var _ domain.Middleware = (*CSRF)(nil)
 
-func NewCSRF(config *domain.Config) *CSRF {
+func NewCSRF(config *domain.Config, now func() time.Time) *CSRF {
 	return &CSRF{
-		active:       true,
+		now:          now,
 		securecookie: config.UseSecureCookie,
 		masterKey:    config.MasterKey,
 		ttl:          config.CSRFTTL,
@@ -39,77 +43,64 @@ const (
 )
 
 func (m *CSRF) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
-	if !m.active {
-		next(w, r)
-		return
-	}
-
-	if r.Method == http.MethodGet {
-		// child request in the same page
-		if r.Referer() != "" && !strings.HasPrefix(r.Referer(), r.Host) {
-			r = m.referrerGetHTTP(w, r)
-		} else {
-			r = m.getHTTP(w, r)
-		}
-	}
-
-	if r.Method == http.MethodPost || r.Method == http.MethodPut {
-		if r.Header.Get("Content-Type") == "application/x-www-form-urlencoded" {
-			r = m.formHTTP(w, r)
+	switch r.Method {
+	case http.MethodGet, http.MethodHead:
+		r = m.getHTTP(w, r)
+	case http.MethodPost, http.MethodPut:
+		if isFormRequest(r) {
+			r = m.formHTTP(r)
 		}
 	}
 
 	next(w, r)
 }
 
+// getHTTP reuses the cookie of the browser (so requests of other tabs or
+// static files do not invalidate the forms) and creates a token for the forms.
 func (m *CSRF) getHTTP(w http.ResponseWriter, r *http.Request) *http.Request {
-	csrfToken, err := generateCSRFCookieValue()
-	if err != nil {
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		return r
-	}
-	csrfCookie := &http.Cookie{
-		Name:     csrfCookieName,
-		Value:    csrfToken,
-		HttpOnly: true,
-		Secure:   m.securecookie,
-		Path:     "/",
-	}
-	http.SetCookie(w, csrfCookie)
-
-	csrfToken, err = m.generateCSRFToken(csrfCookie.Value)
-	if err != nil {
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		return r
+	cookieValue := ""
+	if cookie, err := r.Cookie(csrfCookieName); err == nil && len(cookie.Value) >= csrfTokenLen {
+		cookieValue = cookie.Value
 	}
 
-	r = utils.SetCSRFToken(r, csrfToken)
-	return r
-}
+	if cookieValue == "" {
+		value, err := generateCSRFCookieValue()
+		if err != nil {
+			utils.InternalServerError(w, err.Error())
+			return r
+		}
 
-func (m *CSRF) referrerGetHTTP(w http.ResponseWriter, r *http.Request) *http.Request {
-	csrfCookie, err := r.Cookie(csrfCookieName)
-	if err != nil {
-		return r
+		cookieValue = value
+		http.SetCookie(w, &http.Cookie{
+			Name:     csrfCookieName,
+			Value:    cookieValue,
+			HttpOnly: true,
+			Secure:   m.securecookie,
+			SameSite: http.SameSiteLaxMode,
+			Path:     "/",
+		})
 	}
 
-	csrfToken, err := m.generateCSRFToken(csrfCookie.Value)
+	csrfToken, err := m.generateCSRFToken(cookieValue)
 	if err != nil {
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		utils.InternalServerError(w, err.Error())
 		return r
 	}
 
 	return utils.SetCSRFToken(r, csrfToken)
 }
 
-func (m *CSRF) formHTTP(w http.ResponseWriter, r *http.Request) *http.Request {
+func (m *CSRF) formHTTP(r *http.Request) *http.Request {
 	csrfCookie, err := r.Cookie(csrfCookieName)
 	if err != nil {
 		return r
 	}
 
-	r.ParseForm()
-	csrfToken := r.FormValue(csrfInputName)
+	if err := r.ParseForm(); err != nil {
+		return r
+	}
+
+	csrfToken := r.PostFormValue(csrfInputName)
 	if csrfToken == "" {
 		return r
 	}
@@ -123,10 +114,10 @@ func (m *CSRF) formHTTP(w http.ResponseWriter, r *http.Request) *http.Request {
 }
 
 func (m *CSRF) generateCSRFToken(csrfCookie string) (string, error) {
-	csrfToken := fmt.Sprintf("%s:%d", csrfCookie, time.Now().Unix())
+	csrfToken := fmt.Sprintf("%s:%d", csrfCookie, m.now().Unix())
 	csrfToken, err := cryptography.Encrypts(m.masterKey, csrfToken)
 	if err != nil {
-		return "", fmt.Errorf("Cannot encryp CSRF token: %w", err)
+		return "", fmt.Errorf("Cannot encrypt CSRF token: %w", err)
 	}
 
 	return csrfToken, nil
@@ -138,14 +129,8 @@ func (m *CSRF) validateCSRFToken(csrfCookie string, csrfToken string) bool {
 		return false
 	}
 
-	split := strings.Split(v, ":")
-	if len(split) != 2 {
-		return false
-	}
-
-	token := split[0]
-	unixtime := split[1]
-	if unixtime == "" {
+	token, unixtime, found := strings.Cut(v, ":")
+	if !found {
 		return false
 	}
 
@@ -154,12 +139,16 @@ func (m *CSRF) validateCSRFToken(csrfCookie string, csrfToken string) bool {
 		return false
 	}
 
-	t := time.Unix(i, 0)
-	if time.Now().Sub(t) > m.ttl {
+	if m.now().Sub(time.Unix(i, 0)) > m.ttl {
 		return false
 	}
 
-	return csrfCookie == token
+	return subtle.ConstantTimeCompare([]byte(csrfCookie), []byte(token)) == 1
+}
+
+func isFormRequest(r *http.Request) bool {
+	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	return err == nil && mediaType == "application/x-www-form-urlencoded"
 }
 
 func generateCSRFCookieValue() (string, error) {
@@ -168,5 +157,5 @@ func generateCSRFCookieValue() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return base64.URLEncoding.EncodeToString(b), nil
+	return base64.RawURLEncoding.EncodeToString(b), nil
 }

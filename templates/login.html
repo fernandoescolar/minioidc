@@ -4,6 +4,9 @@
         {{ if .InvalidLogin }}
         ⚠️ Invalid login
         {{ end }}
+        {{ if .TooManyAttempts }}
+        ⛔ Too many failed attempts. Try it again later.
+        {{ end }}
         {{ if .UnknownError }}
         ☢️ Error. Try it again later or contact the administrator.
         {{ end }}

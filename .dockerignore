@@ -9,3 +9,5 @@ LICENSE
 *.pem
 *.sqlite3
 *.http
+web/admin/node_modules
+internal/admin/ui/dist

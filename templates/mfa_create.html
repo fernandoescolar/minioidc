@@ -6,6 +6,9 @@
         {{ if .InvalidVerificationCode }}
         ⚠️ Invalid verification code
         {{ end }}
+        {{ if .TooManyAttempts }}
+        ⛔ Too many failed attempts. Try it again later.
+        {{ end }}
         {{ if .UnknownError }}
         ☢️ Error. Try it again later or contact the administrator.
         {{ end }}
@@ -25,7 +28,7 @@
     <input type="hidden" name="verification_iv" value="{{.IV}}" />
     <input type="hidden" name="__csrf" value="{{ .CSRF }}">
 </form>
-<script src="/static/qrcode.min.js"></script>
+<script src="{{ basePath }}/static/qrcode.min.js"></script>
 <script>
     new QRCode(document.getElementById("qrcode"), {
         text: "{{.QRCode}}",

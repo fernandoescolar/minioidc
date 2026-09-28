@@ -5,11 +5,16 @@ import (
 )
 
 type SessionStore interface {
-	NewSession(sessionID string, user User, expiresAt time.Time, mfaRequired bool) (Session, error)
+	NewSession(sessionID string, user User, authTime, expiresAt time.Time, mfaRequired bool) (Session, error)
 	GetSessionByID(id string) (Session, error)
 	VerifyMFA(sessionID string) error
 	UpdateTTL(sessionID string, expiresAt time.Time) error
+	DeleteSession(sessionID string) error
 	DeleteUserSessions(userID string)
+	// ListUserSessions returns the sessions of a user that have not expired
+	ListUserSessions(userID string, now time.Time) ([]Session, error)
+	// DeleteAllSessions logs out all the users
+	DeleteAllSessions() error
 	CleanExpired()
 }
 
@@ -17,22 +22,30 @@ type Session interface {
 	ID() string
 	User() User
 	MFARequired() bool
-	HasExpired() bool
+	AuthTime() time.Time
+	ExpiresAt() time.Time
+	// AuthMethods are the authentication methods used (RFC 8176 amr values)
+	AuthMethods() []string
+	HasExpired(now time.Time) bool
 }
 
 type session struct {
-	id         string
-	user       User
-	requireMFA bool
-	expiresAt  time.Time
+	id          string
+	user        User
+	requireMFA  bool
+	mfaVerified bool
+	authTime    time.Time
+	expiresAt   time.Time
 }
 
-func NewSession(sessionID string, user User, requireMFA bool, expiresAt time.Time) Session {
+func NewSession(sessionID string, user User, requireMFA, mfaVerified bool, authTime, expiresAt time.Time) Session {
 	return Session(&session{
-		id:         sessionID,
-		user:       user,
-		requireMFA: requireMFA,
-		expiresAt:  expiresAt,
+		id:          sessionID,
+		user:        user,
+		requireMFA:  requireMFA,
+		mfaVerified: mfaVerified,
+		authTime:    authTime,
+		expiresAt:   expiresAt,
 	})
 }
 
@@ -48,6 +61,22 @@ func (s *session) MFARequired() bool {
 	return s.requireMFA
 }
 
-func (s *session) HasExpired() bool {
-	return time.Now().After(s.expiresAt)
+func (s *session) AuthTime() time.Time {
+	return s.authTime
+}
+
+func (s *session) ExpiresAt() time.Time {
+	return s.expiresAt
+}
+
+func (s *session) AuthMethods() []string {
+	if s.mfaVerified {
+		return []string{"pwd", "otp", "mfa"}
+	}
+
+	return []string{"pwd"}
+}
+
+func (s *session) HasExpired(now time.Time) bool {
+	return now.After(s.expiresAt)
 }

@@ -3,24 +3,35 @@ package handlers
 import (
 	"html/template"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/fernandoescolar/minioidc/internal/api/utils"
 	"github.com/fernandoescolar/minioidc/internal/stores"
-	"github.com/fernandoescolar/minioidc/pkg/cryptography"
 	"github.com/fernandoescolar/minioidc/pkg/domain"
 )
 
 type LoginHandler struct {
 	name          string
 	now           func() time.Time
-	templates     []string
+	template      *template.Template
 	sessionTTL    time.Duration
 	sessionStore  domain.SessionStore
 	userStore     domain.UserStore
+	userBlocked   domain.UserBlockedStore
 	masterKey     string
 	requireMFA    bool
 	secureCookies bool
+	home          string
+}
+
+type loginModel struct {
+	Name            string
+	Username        string
+	InvalidLogin    bool
+	TooManyAttempts bool
+	UnknownError    bool
+	CSRF            string
 }
 
 var _ http.Handler = (*LoginHandler)(nil)
@@ -29,42 +40,27 @@ func NewLoginHandler(config *domain.Config, now func() time.Time) *LoginHandler 
 	return &LoginHandler{
 		name:          config.Name,
 		now:           now,
-		templates:     []string{config.BaseTemplateFilepath, config.LoginTemplateFilepath},
+		template:      utils.ParseTemplates(config.BasePath, config.BaseTemplateFilepath, config.LoginTemplateFilepath),
 		sessionTTL:    config.SessionTTL,
 		sessionStore:  config.SessionStore,
 		userStore:     config.UserStore,
+		userBlocked:   config.UserBlockedStore,
 		masterKey:     config.MasterKey,
 		requireMFA:    config.RequireMFA,
 		secureCookies: config.UseSecureCookie,
+		home:          config.BasePath + "/",
 	}
 }
 
 func (h *LoginHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// show login form
-	if r.Method == http.MethodGet {
-		h.getHTTP(w, r)
-		return
-	}
-
-	// handle login form submission
-	if r.Method == http.MethodPost {
+	switch r.Method {
+	case http.MethodGet:
+		h.render(w, loginModel{CSRF: utils.GetCSRFToken(r), Username: loginHint(r)})
+	case http.MethodPost:
 		h.postHTTP(w, r)
-		return
+	default:
+		http.NotFound(w, r)
 	}
-
-	// handle logout
-	if r.Method == http.MethodDelete {
-		h.deleteHTTP(w, r)
-		return
-	}
-
-	// not found
-	http.NotFound(w, r)
-}
-
-func (h *LoginHandler) getHTTP(w http.ResponseWriter, r *http.Request) {
-	csrf := utils.GetCSRFToken(r)
-	h.renderLoginPage(w, "", false, false, csrf)
 }
 
 func (h *LoginHandler) postHTTP(w http.ResponseWriter, r *http.Request) {
@@ -73,71 +69,66 @@ func (h *LoginHandler) postHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	csrf := utils.GetCSRFToken(r)
-	returnURL := utils.GetReturnURL(r)
-	username := r.FormValue("username")
-	password := r.FormValue("password")
+	now := h.now()
+	username := r.PostFormValue("username")
+	password := r.PostFormValue("password")
+	model := loginModel{Username: username, CSRF: utils.GetCSRFToken(r)}
+
+	// the block is checked before the password, so a blocked account does not
+	// reveal if a password is right. Any username can be blocked, so it does not
+	// reveal which users exist either.
+	blockKey := "login:" + strings.ToLower(username)
+	if h.userBlocked.IsBlocked(blockKey, now) {
+		model.TooManyAttempts = true
+		h.render(w, model)
+		return
+	}
+
+	if username == "" || password == "" {
+		model.InvalidLogin = true
+		h.render(w, model)
+		return
+	}
 
 	user, err := h.userStore.GetUserByUsernameAndPassword(username, password)
 	if err != nil {
-		h.renderLoginPage(w, username, true, false, csrf)
+		model.TooManyAttempts = h.userBlocked.AddFailedAttempt(blockKey, now)
+		model.InvalidLogin = !model.TooManyAttempts
+		h.render(w, model)
 		return
 	}
 
-	expiresAt := h.now().Add(h.sessionTTL)
-	session, err := h.sessionStore.NewSession(stores.CreateUID(), user, expiresAt, h.requireMFA)
+	h.userBlocked.Reset(blockKey)
+
+	expiresAt := now.Add(h.sessionTTL)
+	session, err := h.sessionStore.NewSession(stores.CreateUID(), user, now, expiresAt, h.requireMFA)
 	if err != nil {
-		h.renderLoginPage(w, username, false, true, csrf)
+		model.UnknownError = true
+		h.render(w, model)
 		return
 	}
 
-	// encrypt session ID
-	encryptedSessionID, err := cryptography.Encrypts(h.masterKey, session.ID())
-	if err != nil {
-		h.renderLoginPage(w, username, false, true, csrf)
+	if err := utils.SetSessionCookie(w, h.masterKey, session.ID(), expiresAt, h.secureCookies); err != nil {
+		model.UnknownError = true
+		h.render(w, model)
 		return
 	}
-	http.SetCookie(w, &http.Cookie{
-		Name:     "session",
-		Value:    encryptedSessionID,
-		Expires:  expiresAt,
-		HttpOnly: true,
-		SameSite: http.SameSiteStrictMode,
-		Secure:   h.secureCookies,
-	})
 
-	w.Header().Set("Location", returnURL)
-	w.WriteHeader(http.StatusFound)
+	http.Redirect(w, r, utils.GetReturnURL(r, h.home), http.StatusFound)
 }
 
-func (h *LoginHandler) deleteHTTP(w http.ResponseWriter, _ *http.Request) {
-	http.SetCookie(w, &http.Cookie{
-		Name:     "session",
-		Value:    "",
-		Expires:  h.now().Add(-1),
-		HttpOnly: true,
-		SameSite: http.SameSiteStrictMode,
-		Secure:   h.secureCookies,
-	})
+// loginHint returns the login_hint parameter (OIDC Core section 3.1.2.1) to prefill the username
+func loginHint(r *http.Request) string {
+	const maxLength = 256
+	hint := r.URL.Query().Get("login_hint")
+	if len(hint) > maxLength {
+		return ""
+	}
 
-	w.WriteHeader(http.StatusNoContent)
+	return hint
 }
 
-func (h *LoginHandler) renderLoginPage(w http.ResponseWriter, username string, invalidLogin bool, unknownError bool, csrf string) {
-	tmpl, err := template.ParseFiles(h.templates...)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	err = tmpl.Execute(w, struct {
-		Name                       string
-		Username                   string
-		InvalidLogin, UnknownError bool
-		CSRF                       string
-	}{h.name, username, invalidLogin, unknownError, csrf})
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
+func (h *LoginHandler) render(w http.ResponseWriter, model loginModel) {
+	model.Name = h.name
+	utils.RenderTemplate(w, h.template, model)
 }

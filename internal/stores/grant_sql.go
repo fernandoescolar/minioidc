@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/fernandoescolar/minioidc/pkg/domain"
-	"github.com/golang-jwt/jwt"
 )
 
 type sqlGrantStore struct {
@@ -28,109 +27,131 @@ func NewSqliteGrantStore(db *sql.DB, clientStore domain.ClientStore, sessionStor
 }
 
 // NewCodeGrant creates a new Grant for a User
-func (gs *sqlGrantStore) NewCodeGrant(id string, client domain.Client, session domain.Session, expiresAt time.Time, scopes []string, nonce string, codeChallenge, codeChallengeMethod string) (domain.Grant, error) {
-	scopesStr := strings.Join(scopes, " ")
-	grant := &miniGrant{
-		id:                  id,
-		grantType:           domain.GrantTypeCode,
-		clientID:            client.ClientID(),
-		sessionID:           session.ID(),
-		expiresAt:           expiresAt,
-		scopes:              scopesStr,
-		nonce:               nonce,
-		codeChallenge:       codeChallenge,
-		codeChallengeMethod: codeChallengeMethod,
-	}
-
-	_, err := gs.db.Exec("INSERT INTO grants VALUES(?,?,?,?,?,?,?,?,?);", grant.id, grant.grantType, grant.clientID, grant.sessionID, grant.expiresAt, scopesStr, grant.nonce, grant.codeChallenge, grant.codeChallengeMethod)
-
-	if err != nil {
-		return nil, fmt.Errorf("NewCodeGrant: %w", err)
-	}
-
-	return gs.ToGrant(grant)
+func (gs *sqlGrantStore) NewCodeGrant(id string, client domain.Client, session domain.Session, expiresAt time.Time, scopes []string, nonce string, codeChallenge, codeChallengeMethod, redirectURI string) (domain.Grant, error) {
+	return gs.insert(domain.GrantData{
+		ID:                  id,
+		FamilyID:            id,
+		GrantType:           domain.GrantTypeCode,
+		ExpiresAt:           expiresAt,
+		Scopes:              scopes,
+		Nonce:               nonce,
+		CodeChallenge:       codeChallenge,
+		CodeChallengeMethod: codeChallengeMethod,
+		RedirectURI:         redirectURI,
+	}, client, session)
 }
 
 // NewRefreshTokenGrant creates a new Grant for a User
-func (gs *sqlGrantStore) NewRefreshTokenGrant(id string, client domain.Client, session domain.Session, expiresAt time.Time, scopes []string) (domain.Grant, error) {
-	scopesStr := strings.Join(scopes, " ")
-	grant := &miniGrant{
-		id:        id,
-		grantType: domain.GrantTypeRefresh,
-		clientID:  client.ClientID(),
-		sessionID: session.ID(),
-		expiresAt: expiresAt,
-		scopes:    scopesStr,
-	}
+func (gs *sqlGrantStore) NewRefreshTokenGrant(id, familyID string, client domain.Client, session domain.Session, expiresAt time.Time, scopes []string) (domain.Grant, error) {
+	return gs.insert(domain.GrantData{
+		ID:        id,
+		FamilyID:  familyID,
+		GrantType: domain.GrantTypeRefresh,
+		ExpiresAt: expiresAt,
+		Scopes:    scopes,
+	}, client, session)
+}
 
-	_, err := gs.db.Exec("INSERT INTO grants VALUES(?,?,?,?,?,?,?,?,?);", grant.id, grant.grantType, grant.clientID, grant.sessionID, grant.expiresAt, scopesStr, grant.nonce, grant.codeChallenge, grant.codeChallengeMethod)
+func (gs *sqlGrantStore) insert(data domain.GrantData, client domain.Client, session domain.Session) (domain.Grant, error) {
+	_, err := gs.db.Exec(
+		"INSERT INTO grants(id, familyID, used, grantType, clientID, sessionID, expiresAt, scopes, nonce, codeChallenge, codeChallengeMethod, redirectURI) VALUES(?,?,?,?,?,?,?,?,?,?,?,?);",
+		data.ID, data.FamilyID, false, data.GrantType, client.ClientID(), session.ID(), data.ExpiresAt, strings.Join(data.Scopes, " "),
+		data.Nonce, data.CodeChallenge, data.CodeChallengeMethod, data.RedirectURI,
+	)
 	if err != nil {
-		return nil, fmt.Errorf("NewRefreshTokenGrant: %w", err)
+		return nil, fmt.Errorf("insert grant: %w", err)
 	}
 
-	return gs.ToGrant(grant)
+	return domain.NewGrant(data, client, session), nil
 }
 
-// GetGrantByID looks up the Grant
-func (gs *sqlGrantStore) GetGrantByID(id string) (domain.Grant, error) {
-	grant := &miniGrant{}
-	row := gs.db.QueryRow("SELECT id, grantType, clientID, sessionID, expiresAt, scopes, nonce, codeChallenge, codeChallengeMethod FROM grants WHERE id = ?;", id)
-	err := row.Scan(&grant.id, &grant.grantType, &grant.clientID, &grant.sessionID, &grant.expiresAt, &grant.scopes, &grant.nonce, &grant.codeChallenge, &grant.codeChallengeMethod)
-	if err != nil {
-		return nil, fmt.Errorf("GetGrantByID: %w", err)
-	}
-
-	return gs.ToGrant(grant)
-}
-
-func (gs *sqlGrantStore) GetGrantByToken(token *jwt.Token) (domain.Grant, error) {
-	claims, ok := token.Claims.(jwt.MapClaims)
-	if !ok || !token.Valid {
-		return nil, errors.New("invalid token")
-	}
-
-	grantID := claims["jti"].(string)
-	return gs.GetGrantByID(grantID)
-}
-
+// GetGrantByIDAndType looks up the Grant
 func (gs *sqlGrantStore) GetGrantByIDAndType(id string, grantType domain.GrantType) (domain.Grant, error) {
-	grant, err := gs.GetGrantByID(id)
+	var (
+		data                               domain.GrantData
+		clientID, sessionID, scopes        string
+		familyID, nonce, challenge, method sql.NullString
+		redirectURI                        sql.NullString
+		used                               sql.NullBool
+	)
+
+	row := gs.db.QueryRow("SELECT id, familyID, used, grantType, clientID, sessionID, expiresAt, scopes, nonce, codeChallenge, codeChallengeMethod, redirectURI FROM grants WHERE id = ?;", id)
+	err := row.Scan(&data.ID, &familyID, &used, &data.GrantType, &clientID, &sessionID, &data.ExpiresAt, &scopes, &nonce, &challenge, &method, &redirectURI)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("GetGrantByIDAndType: %w", err)
 	}
 
-	if grant.GrantType() != grantType {
+	if data.GrantType != grantType {
 		return nil, errors.New("grant not found")
 	}
 
-	return grant, nil
+	// the nullable columns were added by migrations
+	data.FamilyID = familyID.String
+	if data.FamilyID == "" {
+		data.FamilyID = data.ID
+	}
+	data.Used = used.Bool
+	data.Scopes = strings.Split(scopes, " ")
+	data.Nonce = nonce.String
+	data.CodeChallenge = challenge.String
+	data.CodeChallengeMethod = method.String
+	data.RedirectURI = redirectURI.String
+
+	session, err := gs.sessionStore.GetSessionByID(sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("GetGrantByIDAndType: %w", err)
+	}
+
+	client, err := gs.clientStore.GetClientByID(clientID)
+	if err != nil {
+		return nil, fmt.Errorf("GetGrantByIDAndType: %w", err)
+	}
+
+	return domain.NewGrant(data, client, session), nil
 }
 
-// DeleteGrantByID deletes a grant
+// Grant marks a grant as used
 func (gs *sqlGrantStore) Grant(id string) error {
-	_, err := gs.db.Exec("DELETE FROM grants WHERE id = ?;", id)
-	return err
+	r, err := gs.db.Exec("UPDATE grants SET used = 1 WHERE id = ? AND (used IS NULL OR used = 0);", id)
+	if err != nil {
+		return fmt.Errorf("Grant: %w", err)
+	}
+
+	rows, err := r.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("Grant: %w", err)
+	}
+
+	if rows != 1 {
+		return errors.New("grant not found")
+	}
+
+	return nil
+}
+
+// RevokeFamily deletes all the grants of a family
+func (gs *sqlGrantStore) RevokeFamily(familyID string) error {
+	_, err := gs.db.Exec("DELETE FROM grants WHERE familyID = ? OR id = ?;", familyID, familyID)
+	if err != nil {
+		return fmt.Errorf("RevokeFamily: %w", err)
+	}
+
+	return nil
+}
+
+// RevokeClient deletes all the grants of a client
+func (gs *sqlGrantStore) RevokeClient(clientID string) error {
+	if _, err := gs.db.Exec("DELETE FROM grants WHERE clientID = ?;", clientID); err != nil {
+		return fmt.Errorf("RevokeClient: %w", err)
+	}
+
+	return nil
 }
 
 // CleanExpired deletes all expired grants
 func (gs *sqlGrantStore) CleanExpired() {
 	_, err := gs.db.Exec("DELETE FROM grants WHERE expiresAt < ?;", time.Now())
 	if err != nil {
-		log.Println("WRN Grants CleanExpired: %w", err)
+		log.Printf("WRN Grants CleanExpired: %v", err)
 	}
-}
-
-func (gs *sqlGrantStore) ToGrant(grant *miniGrant) (domain.Grant, error) {
-	session, err := gs.sessionStore.GetSessionByID(grant.sessionID)
-	if err != nil {
-		return nil, fmt.Errorf("ToGrant: %w", err)
-	}
-
-	client, err := gs.clientStore.GetClientByID(grant.clientID)
-	if err != nil {
-		return nil, fmt.Errorf("ToGrant: %w", err)
-	}
-
-	scopes := strings.Split(grant.scopes, " ")
-	return domain.NewGrant(grant.id, grant.grantType, client, session, grant.expiresAt, scopes, grant.nonce, grant.codeChallenge, grant.codeChallengeMethod), nil
 }

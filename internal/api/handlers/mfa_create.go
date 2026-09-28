@@ -4,6 +4,8 @@ import (
 	"html/template"
 	"log"
 	"net/http"
+	"net/url"
+	"time"
 
 	"github.com/fernandoescolar/minioidc/internal/api/utils"
 	"github.com/fernandoescolar/minioidc/internal/stores"
@@ -12,10 +14,14 @@ import (
 )
 
 type MFACreateHandler struct {
-	templates    []string
-	issuer       string
-	mfaStore     domain.MFACodeStore
-	sessionStore domain.SessionStore
+	now            func() time.Time
+	template       *template.Template
+	issuer         string
+	verifyEndpoint string
+	mfaStore       domain.MFACodeStore
+	sessionStore   domain.SessionStore
+	userBlocked    domain.UserBlockedStore
+	home           string
 }
 
 type mfaCreateModel struct {
@@ -23,145 +29,119 @@ type mfaCreateModel struct {
 	IV                      string
 	QRCode                  string
 	InvalidVerificationCode bool
+	TooManyAttempts         bool
 	UnknownError            bool
 	CSRF                    string
 }
 
 var _ http.Handler = (*MFACreateHandler)(nil)
 
-func NewMfaCreateHandler(config *domain.Config) *MFACreateHandler {
+func NewMfaCreateHandler(config *domain.Config, now func() time.Time, verifyEndpoint string) *MFACreateHandler {
 	return &MFACreateHandler{
-		templates:    []string{config.BaseTemplateFilepath, config.MFACreateTemplateFilepath},
-		issuer:       config.Name,
-		mfaStore:     config.MFACodeStore,
-		sessionStore: config.SessionStore,
+		now:            now,
+		template:       utils.ParseTemplates(config.BasePath, config.BaseTemplateFilepath, config.MFACreateTemplateFilepath),
+		issuer:         config.Name,
+		verifyEndpoint: verifyEndpoint,
+		mfaStore:       config.MFACodeStore,
+		sessionStore:   config.SessionStore,
+		userBlocked:    config.UserBlockedStore,
+		home:           config.BasePath + "/",
 	}
 }
 
 func (h *MFACreateHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// create mfa form
-	if r.Method == http.MethodGet {
-		h.getHTTP(w, r)
+	if r.Method != http.MethodGet && r.Method != http.MethodPost {
+		http.NotFound(w, r)
 		return
 	}
 
-	// handle mfa creation submission
-	if r.Method == http.MethodPost {
-		h.postHTTP(w, r)
-		return
-	}
-
-	// not found
-	http.NotFound(w, r)
-}
-
-func (h *MFACreateHandler) getHTTP(w http.ResponseWriter, r *http.Request) {
 	session := utils.GetSession(r)
 	if session == nil {
 		utils.InternalServerError(w, "Failed to get session")
 		return
 	}
 
-	iv, err := cryptography.RandomPassword(16)
+	// users with MFA must verify it: enrolling a new code would bypass it
+	hasMFA, err := h.mfaStore.UserHasMFACodes(session.User().ID())
 	if err != nil {
-		utils.InternalServerError(w, "Failed to generate random password")
+		utils.InternalServerError(w, err.Error())
 		return
 	}
 
-	topt := cryptography.NewTOTPDefault(iv)
-	qrCode := topt.Uri(h.issuer, session.User().Username())
-	model := mfaCreateModel{
-		Name:                    h.issuer,
-		IV:                      iv,
-		QRCode:                  qrCode,
-		InvalidVerificationCode: false,
-		UnknownError:            false,
+	if hasMFA {
+		location := h.verifyEndpoint + "?return_url=" + url.QueryEscape(utils.GetReturnURL(r, h.home))
+		http.Redirect(w, r, location, http.StatusFound)
+		return
 	}
 
-	h.showMfaCreateForm(w, r, model)
+	if r.Method == http.MethodGet {
+		h.getHTTP(w, r, session)
+		return
+	}
+
+	h.postHTTP(w, r, session)
 }
 
-func (h *MFACreateHandler) postHTTP(w http.ResponseWriter, r *http.Request) {
+func (h *MFACreateHandler) getHTTP(w http.ResponseWriter, r *http.Request, session domain.Session) {
+	secret, err := cryptography.NewTOTPSecret()
+	if err != nil {
+		utils.InternalServerError(w, "Failed to generate random secret")
+		return
+	}
+
+	h.render(w, r, session, mfaCreateModel{IV: secret})
+}
+
+func (h *MFACreateHandler) postHTTP(w http.ResponseWriter, r *http.Request, session domain.Session) {
 	if !utils.GetCSRFValid(r) {
 		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return
 	}
 
-	session := utils.GetSession(r)
-	if session == nil {
-		utils.InternalServerError(w, "Failed to get session")
+	secret := r.PostFormValue("verification_iv")
+	verificationCode := r.PostFormValue("verification_code")
+	if secret == "" || verificationCode == "" {
+		utils.Error(w, utils.InvalidRequest, "Missing verification_iv or verification_code", http.StatusBadRequest)
 		return
 	}
 
-	r.ParseForm()
-	iv := r.FormValue("verification_iv")
-	if iv == "" {
-		utils.Error(w, "invalid_request", "Missing iv", http.StatusBadRequest)
+	now := h.now()
+	blockKey := "mfa:" + session.User().ID()
+	model := mfaCreateModel{IV: secret}
+	if h.userBlocked.IsBlocked(blockKey, now) {
+		model.TooManyAttempts = true
+		h.render(w, r, session, model)
 		return
 	}
 
-	verificationCode := r.FormValue("verification_code")
-	if verificationCode == "" {
-		utils.Error(w, "invalid_request", "Missing verification_code", http.StatusBadRequest)
+	if !cryptography.VerifyTOTP(cryptography.TOTPMethod, secret, verificationCode, now) {
+		model.TooManyAttempts = h.userBlocked.AddFailedAttempt(blockKey, now)
+		model.InvalidVerificationCode = !model.TooManyAttempts
+		h.render(w, r, session, model)
 		return
 	}
 
-	topt := cryptography.NewTOTPDefault(iv)
-	if !topt.Verify(verificationCode, 0, 1) {
-		model := mfaCreateModel{
-			Name:                    h.issuer,
-			IV:                      iv,
-			QRCode:                  topt.Uri(h.issuer, session.User().Username()),
-			InvalidVerificationCode: true,
-			UnknownError:            false,
-		}
-
-		h.showMfaCreateForm(w, r, model)
-		return
-	}
-
-	_, err := h.mfaStore.NewMFACode(stores.CreateUID(), session.User(), iv, "topt")
-	if err != nil {
-		log.Println("create mfa failed: %w", err)
-		model := mfaCreateModel{
-			Name:                    h.issuer,
-			IV:                      iv,
-			QRCode:                  topt.Uri(h.issuer, session.User().Username()),
-			InvalidVerificationCode: false,
-			UnknownError:            true,
-		}
-		h.showMfaCreateForm(w, r, model)
+	if _, err := h.mfaStore.NewMFACode(stores.CreateUID(), session.User(), secret, cryptography.TOTPMethod); err != nil {
+		log.Printf("create mfa failed: %v", err)
+		model.UnknownError = true
+		h.render(w, r, session, model)
 		return
 	}
 
 	if err := h.sessionStore.VerifyMFA(session.ID()); err != nil {
-		log.Println("verify mfa failed: %w", err)
-		model := mfaCreateModel{
-			Name:                    h.issuer,
-			IV:                      iv,
-			QRCode:                  topt.Uri(h.issuer, session.User().Username()),
-			InvalidVerificationCode: false,
-			UnknownError:            true,
-		}
-		h.showMfaCreateForm(w, r, model)
+		log.Printf("verify mfa failed: %v", err)
+		model.UnknownError = true
+		h.render(w, r, session, model)
 		return
 	}
 
-	returnURL := utils.GetReturnURL(r)
-	http.Redirect(w, r, returnURL, http.StatusFound)
+	h.userBlocked.Reset(blockKey)
+	http.Redirect(w, r, utils.GetReturnURL(r, h.home), http.StatusFound)
 }
 
-func (h *MFACreateHandler) showMfaCreateForm(w http.ResponseWriter, r *http.Request, model mfaCreateModel) {
+func (h *MFACreateHandler) render(w http.ResponseWriter, r *http.Request, session domain.Session, model mfaCreateModel) {
+	model.Name = h.issuer
 	model.CSRF = utils.GetCSRFToken(r)
-	tmpl, err := template.ParseFiles(h.templates...)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	err = tmpl.Execute(w, model)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
+	model.QRCode = cryptography.TOTPURI(h.issuer, session.User().Username(), model.IV)
+	utils.RenderTemplate(w, h.template, model)
 }

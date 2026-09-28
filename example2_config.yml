@@ -5,6 +5,8 @@ clients:
     secret_hash: $2a$06$L6/zALdtbkYajjHTZUW29ePBEb/hwhgjhXC4YpHANavvKDJl69ctK # secret
     redirect_uris:
      - http://localhost:5000/callback
+    post_logout_redirect_uris:
+     - http://localhost:5000/
 users:
   - subject: 1
     email: use@mail.com

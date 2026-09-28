@@ -1,15 +1,26 @@
-FROM golang:1.21-alpine AS build
-ENV GOOS=linux
-RUN apk add --no-cache \
-    gcc \
-    musl-dev
+# the admin web does not depend on the platform: it is built once
+FROM --platform=$BUILDPLATFORM node:24-alpine AS web
+WORKDIR /src/web/admin
+COPY web/admin/package.json web/admin/package-lock.json ./
+RUN npm ci
+COPY web/admin/ ./
+RUN npm run build
+
+# pure Go (no CGO): it cross-compiles for the target platform without emulation
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS build
+ARG TARGETOS TARGETARCH
+ENV CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH
 WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
 COPY . .
-RUN go mod download \
- && go build -o /app -a -ldflags '-linkmode external -extldflags "-static"' ./cmd/minioidc/main.go
+COPY --from=web /src/internal/admin/ui/dist ./internal/admin/ui/dist
+RUN go build -trimpath -ldflags '-s -w' -o /app ./cmd/minioidc
 
 FROM scratch AS final
 EXPOSE 8000
+# the optional LDAP server (ldap_server.address)
+EXPOSE 3389
 COPY --from=build /app /app
 COPY --from=build /src/templates /templates
 COPY --from=build /src/static /static

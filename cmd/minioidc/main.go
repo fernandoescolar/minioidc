@@ -40,6 +40,12 @@ func main() {
 	}
 
 	handler := minioidc.Handler()
+	defer minioidc.Close()
+
+	if err := minioidc.StartLDAPServer(); err != nil {
+		log.Fatal(err)
+	}
+
 	server := &http.Server{
 		Addr:              addr,
 		Handler:           handler,

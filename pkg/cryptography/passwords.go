@@ -3,13 +3,15 @@ package cryptography
 import (
 	"crypto/rand"
 	"encoding/base32"
+	"encoding/base64"
 	"fmt"
 
 	"golang.org/x/crypto/bcrypt"
 )
 
 const (
-	DefaultCypherCost = 6 // recommended value for non admin users
+	DefaultCypherCost = 12
+	tokenLength       = 32
 )
 
 // HashPassword hashes a password with the default cypher cost
@@ -24,16 +26,22 @@ func CheckPasswordHash(password, hash string) bool {
 	return err == nil
 }
 
-// RandomPassword generates a random password of the specified length
+// RandomPassword generates a random base32 password from the specified number of random bytes
 func RandomPassword(length int) (string, error) {
-	var result string
 	secret := make([]byte, length)
-	gen, err := rand.Read(secret)
-	if err != nil || gen != length {
-		return result, fmt.Errorf("error reading random: %w", err)
+	if _, err := rand.Read(secret); err != nil {
+		return "", fmt.Errorf("error reading random: %w", err)
 	}
 
-	var encoder = base32.StdEncoding.WithPadding(base32.NoPadding)
-	result = encoder.EncodeToString(secret)
-	return result, nil
+	return base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(secret), nil
+}
+
+// RandomToken generates an opaque random token (256 bits) base64url encoded
+func RandomToken() (string, error) {
+	token := make([]byte, tokenLength)
+	if _, err := rand.Read(token); err != nil {
+		return "", fmt.Errorf("error reading random: %w", err)
+	}
+
+	return base64.RawURLEncoding.EncodeToString(token), nil
 }

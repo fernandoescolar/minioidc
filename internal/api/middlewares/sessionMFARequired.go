@@ -32,7 +32,7 @@ func (m *SessionMFARequired) ServeHTTP(w http.ResponseWriter, r *http.Request, n
 		if session.MFARequired() && !strings.HasPrefix(r.URL.Path, m.createEndpoint) && !strings.HasPrefix(r.URL.Path, m.verifyEndpoint) {
 			hasMFA, err := m.mfaStore.UserHasMFACodes(session.User().ID())
 			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+				utils.InternalServerError(w, err.Error())
 				return
 			}
 

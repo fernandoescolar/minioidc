@@ -18,7 +18,15 @@ test: fmt vet
 
 .PHONY: build
 build: fmt vet
-	go build -o bin/minioidc ./cmd/main.go
+	go build -o bin/minioidc ./cmd/minioidc
+
+# builds the admin web (web/admin) into internal/admin/ui/dist, embedded in the binary
+.PHONY: build-admin
+build-admin:
+	cd web/admin && npm ci && npm run build
+
+.PHONY: build-all
+build-all: build-admin build
 
 .PHONY: build-docker
 build-docker:

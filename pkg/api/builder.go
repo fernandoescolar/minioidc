@@ -1,11 +1,15 @@
 package api
 
 import (
+	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
 	"database/sql"
 	"errors"
 	"fmt"
+	"net/url"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/fernandoescolar/minioidc/internal/db"
@@ -21,7 +25,10 @@ const (
 	Grants                            = 1
 	Sessions                          = 2
 	MFA                               = 4
-	All               SqliteDatabases = Grants | Sessions | MFA
+	ClientAssertions                  = 8
+	Users                             = 16
+	Clients                           = 32
+	All               SqliteDatabases = Grants | Sessions | MFA | ClientAssertions | Users | Clients
 )
 
 type Builder struct {
@@ -33,6 +40,10 @@ type Builder struct {
 	ReuseRefreshTokens    bool
 	PrivateRSAKeyFilepath string
 	PrivateRSAKey         *rsa.PrivateKey
+	// keys used before a key rotation: they are published in the JWKS and
+	// tokens signed with them are still accepted (PEM public or private keys)
+	PreviousRSAKeyFilepaths []string
+	PreviousRSAPublicKeys   []*rsa.PublicKey
 
 	UseHSTS             bool
 	UseCSP              bool
@@ -50,28 +61,34 @@ type Builder struct {
 	LoginTemplateFilepath     string
 	MFACreateTemplateFilepath string
 	MFAVerifyTemplateFilepath string
+	LogoutTemplateFilepath    string
 
-	ClientStore  domain.ClientStore
-	GrantStore   domain.GrantStore
-	SessionStore domain.SessionStore
-	UserStore    domain.UserStore
-	MFACodeStore domain.MFACodeStore
+	ClientStore      domain.ClientStore
+	GrantStore       domain.GrantStore
+	SessionStore     domain.SessionStore
+	UserStore        domain.UserStore
+	UserBlockedStore domain.UserBlockedStore
+	MFACodeStore     domain.MFACodeStore
+	// ClientAssertionStore keeps the used jti of the client assertions
+	ClientAssertionStore domain.ClientAssertionStore
 
-	sqliteFilepath      string
-	sqliteUseInGrants   bool
-	sqliteUseInSessions bool
-	sqliteUseInMFA      bool
+	sqliteFilepath              string
+	sqliteUseInGrants           bool
+	sqliteUseInSessions         bool
+	sqliteUseInMFA              bool
+	sqliteUseInClientAssertions bool
+	sqliteUseInUsers            bool
+	sqliteUseInClients          bool
 
-	ldapServer           string
-	ldapBind             string
-	ldapPassword         string
-	ldapFilterDN         string
-	ldapBaseDN           string
-	ldapSubjectAttribute string
-	ldapNameAttribute    string
-	ldapEmailAttribute   string
-	ldapPhoneAttribute   string
-	ldapAddressAttribute string
+	// LDAPServer serves a read only LDAP directory with the users (nil to disable it)
+	LDAPServer *domain.LDAPServerConfig
+
+	// AdminEnabled serves the admin web at <issuer>/admin/ to the members of
+	// AdminGroup (default "admin"). It requires the clients in SQLite.
+	AdminEnabled bool
+	AdminGroup   string
+
+	ldap *stores.LDAPConfig
 
 	Clients []Client
 	Users   []User
@@ -83,22 +100,49 @@ type LDAPConfig struct {
 	FilterDN         string
 	BaseDN           string
 	SubjectAttribute string
-	NameAttribute    string
-	EmailAttribute   string
-	PhoneAttribute   string
-	AddressAttribute string
+	// NameAttribute is the attribute used as preferred_username (the login)
+	NameAttribute string
+	// optional attributes of the name, given_name and family_name claims
+	DisplayNameAttribute string
+	GivenNameAttribute   string
+	FamilyNameAttribute  string
+	EmailAttribute       string
+	PhoneAttribute       string
+	AddressAttribute     string
+	// GroupsAttribute is optional (e.g. memberOf)
+	GroupsAttribute string
+	// EmailVerified must be true only if the directory verifies the emails
+	EmailVerified bool
 }
 
 type Client struct {
-	ID           string
-	SecretHash   string
-	RedirectURIs []string
+	ID string
+	// SecretHash is the bcrypt hash of the secret. Empty for public clients (PKCE is required).
+	SecretHash string
+	// Secret is the plain secret, only for client_secret_jwt (HMAC assertions)
+	Secret                 string
+	RedirectURIs           []string
+	PostLogoutRedirectURIs []string
+	// TokenEndpointAuthMethod is the only authentication method allowed:
+	// client_secret_basic, client_secret_post, client_secret_jwt, private_key_jwt or none.
+	// If it is empty, client_secret_basic and client_secret_post are allowed
+	// with SecretHash, or none without it.
+	TokenEndpointAuthMethod string
+	// JWKSURI, PublicKeyPaths (PEM public keys or certificates) and PublicKeys
+	// are the keys of the private_key_jwt assertions
+	JWKSURI        string
+	PublicKeyPaths []string
+	PublicKeys     []crypto.PublicKey
 }
 
 type User struct {
 	Subject           string
 	Email             string
+	EmailVerified     bool
 	PreferredUsername string
+	Name              string
+	GivenName         string
+	FamilyName        string
 	PasswordHash      string
 	Phone             string
 	Address           string
@@ -111,6 +155,9 @@ func (b *Builder) UseSQLite(f string, d SqliteDatabases) {
 	b.sqliteUseInGrants = false
 	b.sqliteUseInSessions = false
 	b.sqliteUseInMFA = false
+	b.sqliteUseInClientAssertions = d&ClientAssertions == ClientAssertions
+	b.sqliteUseInUsers = d&Users == Users
+	b.sqliteUseInClients = d&Clients == Clients
 
 	if d&Grants == Grants {
 		b.sqliteUseInGrants = true
@@ -125,16 +172,23 @@ func (b *Builder) UseSQLite(f string, d SqliteDatabases) {
 
 // UseLDAP sets the LDAP connection parameters
 func (b *Builder) UseLDAP(server string, c LDAPConfig) {
-	b.ldapServer = server
-	b.ldapBind = c.Bind
-	b.ldapPassword = c.Password
-	b.ldapFilterDN = c.FilterDN
-	b.ldapBaseDN = c.BaseDN
-	b.ldapSubjectAttribute = c.SubjectAttribute
-	b.ldapNameAttribute = c.NameAttribute
-	b.ldapEmailAttribute = c.EmailAttribute
-	b.ldapPhoneAttribute = c.PhoneAttribute
-	b.ldapAddressAttribute = c.AddressAttribute
+	b.ldap = &stores.LDAPConfig{
+		Server:               server,
+		Bind:                 c.Bind,
+		Password:             c.Password,
+		FilterDN:             c.FilterDN,
+		BaseDN:               c.BaseDN,
+		SubjectAttribute:     c.SubjectAttribute,
+		NameAttribute:        c.NameAttribute,
+		DisplayNameAttribute: c.DisplayNameAttribute,
+		GivenNameAttribute:   c.GivenNameAttribute,
+		FamilyNameAttribute:  c.FamilyNameAttribute,
+		EmailAttribute:       c.EmailAttribute,
+		PhoneAttribute:       c.PhoneAttribute,
+		AddressAttribute:     c.AddressAttribute,
+		GroupsAttribute:      c.GroupsAttribute,
+		EmailVerified:        c.EmailVerified,
+	}
 }
 
 // builds the server
@@ -144,6 +198,10 @@ func (b *Builder) Build() (*Minioidc, error) {
 	}
 
 	if err := b.assignDefaults(); err != nil {
+		return nil, err
+	}
+
+	if err := b.validateTemplates(); err != nil {
 		return nil, err
 	}
 
@@ -159,13 +217,19 @@ func (b *Builder) validate() error {
 	if b.Issuer == "" {
 		return errors.New("issuer is required")
 	}
+	if _, err := issuerBasePath(b.Issuer); err != nil {
+		return err
+	}
 	if b.Audience == "" {
 		return errors.New("audience is required")
+	}
+	if b.MasterKey != "" && len(b.MasterKey) < cryptography.MinMasterKeyLength {
+		return fmt.Errorf("masterkey must have at least %d characters", cryptography.MinMasterKeyLength)
 	}
 	if b.PrivateRSAKeyFilepath != "" && b.PrivateRSAKey != nil {
 		return errors.New("private key and private key filepath are mutually exclusive")
 	}
-	if b.sqliteFilepath == "" && (b.sqliteUseInGrants || b.sqliteUseInSessions) {
+	if b.sqliteFilepath == "" && (b.sqliteUseInGrants || b.sqliteUseInSessions || b.sqliteUseInMFA || b.sqliteUseInClientAssertions || b.sqliteUseInUsers || b.sqliteUseInClients) {
 		return errors.New("sqlite filepath is required")
 	}
 	if b.sqliteUseInGrants && b.GrantStore != nil {
@@ -174,36 +238,44 @@ func (b *Builder) validate() error {
 	if b.sqliteUseInSessions && b.SessionStore != nil {
 		return errors.New("sqlite session store and session store are mutually exclusive")
 	}
-	if b.ldapServer != "" && b.UserStore != nil {
+	if b.sqliteUseInUsers && (b.UserStore != nil || b.ldap != nil) {
+		return errors.New("sqlite user store, ldap and user store are mutually exclusive")
+	}
+	if b.sqliteUseInClients && b.ClientStore != nil {
+		return errors.New("sqlite client store and client store are mutually exclusive")
+	}
+	if b.LDAPServer != nil {
+		if err := b.validateLDAPServer(); err != nil {
+			return err
+		}
+	}
+	if b.AdminEnabled && !b.sqliteUseInClients {
+		if _, ok := b.ClientStore.(domain.ClientAdminStore); !ok {
+			return errors.New("the admin web requires the clients in sqlite (use_in_clients)")
+		}
+	}
+	if b.sqliteUseInClientAssertions && b.ClientAssertionStore != nil {
+		return errors.New("sqlite client assertion store and client assertion store are mutually exclusive")
+	}
+	if b.ldap != nil && b.UserStore != nil {
 		return errors.New("ldap and user store are mutually exclusive")
 	}
-	if b.ldapServer != "" {
-		if b.ldapBind == "" {
-			return errors.New("ldap bind is required")
+	if b.ldap != nil {
+		required := map[string]string{
+			"bind":              b.ldap.Bind,
+			"password":          b.ldap.Password,
+			"filter dn":         b.ldap.FilterDN,
+			"base dn":           b.ldap.BaseDN,
+			"subject attribute": b.ldap.SubjectAttribute,
+			"name attribute":    b.ldap.NameAttribute,
+			"email attribute":   b.ldap.EmailAttribute,
+			"phone attribute":   b.ldap.PhoneAttribute,
+			"address attribute": b.ldap.AddressAttribute,
 		}
-		if b.ldapPassword == "" {
-			return errors.New("ldap password is required")
-		}
-		if b.ldapFilterDN == "" {
-			return errors.New("ldap filter dn is required")
-		}
-		if b.ldapBaseDN == "" {
-			return errors.New("ldap base dn is required")
-		}
-		if b.ldapSubjectAttribute == "" {
-			return errors.New("ldap subject attribute is required")
-		}
-		if b.ldapNameAttribute == "" {
-			return errors.New("ldap name attribute is required")
-		}
-		if b.ldapEmailAttribute == "" {
-			return errors.New("ldap email attribute is required")
-		}
-		if b.ldapPhoneAttribute == "" {
-			return errors.New("ldap phone attribute is required")
-		}
-		if b.ldapAddressAttribute == "" {
-			return errors.New("ldap address attribute is required")
+		for name, value := range required {
+			if value == "" {
+				return fmt.Errorf("ldap %s is required", name)
+			}
 		}
 	}
 
@@ -224,7 +296,7 @@ func (b *Builder) assignDefaults() error {
 		b.Name = "minioidc"
 	}
 	if b.MasterKey == "" {
-		masterKey, err := cryptography.RandomPassword(16)
+		masterKey, err := cryptography.RandomPassword(cryptography.MinMasterKeyLength)
 		if err != nil {
 			return fmt.Errorf("cannot create random masterkey: %w", err)
 		}
@@ -266,15 +338,30 @@ func (b *Builder) assignDefaults() error {
 	if b.MFAVerifyTemplateFilepath == "" {
 		b.MFAVerifyTemplateFilepath = "templates/mfa_verify.html"
 	}
+	if b.LDAPServer != nil && b.LDAPServer.Address == "" {
+		b.LDAPServer.Address = ":3389"
+	}
+	if b.AdminGroup == "" {
+		b.AdminGroup = "admin"
+	}
+	if b.LogoutTemplateFilepath == "" {
+		b.LogoutTemplateFilepath = "templates/logout.html"
+	}
 
 	return nil
 }
 
 func (b *Builder) config() (*domain.Config, error) {
+	basePath, err := issuerBasePath(b.Issuer)
+	if err != nil {
+		return nil, err
+	}
+
 	config := &domain.Config{
 		Name:               b.Name,
 		MasterKey:          b.MasterKey,
 		Issuer:             b.Issuer,
+		BasePath:           basePath,
 		Audience:           b.Audience,
 		RequireMFA:         b.RequireMFA,
 		ReuseRefreshTokens: b.ReuseRefreshTokens,
@@ -295,6 +382,11 @@ func (b *Builder) config() (*domain.Config, error) {
 		LoginTemplateFilepath:     b.LoginTemplateFilepath,
 		MFACreateTemplateFilepath: b.MFACreateTemplateFilepath,
 		MFAVerifyTemplateFilepath: b.MFAVerifyTemplateFilepath,
+		LogoutTemplateFilepath:    b.LogoutTemplateFilepath,
+
+		AdminEnabled: b.AdminEnabled,
+		AdminGroup:   b.AdminGroup,
+		LDAPServer:   b.LDAPServer,
 	}
 
 	if err := b.assignPrivateKey(config); err != nil {
@@ -313,41 +405,44 @@ func (b *Builder) config() (*domain.Config, error) {
 }
 
 func (b *Builder) assignPrivateKey(config *domain.Config) error {
-	if b.PrivateRSAKey != nil {
-		keypair, err := cryptography.NewKeypair(b.PrivateRSAKey)
-		if err != nil {
-			return fmt.Errorf("keypair: %w", err)
-		}
-
-		config.Keypair = keypair
-	}
-
+	rsaKey := b.PrivateRSAKey
 	if b.PrivateRSAKeyFilepath != "" {
-		rsaKey, err := cryptography.LoadPrivateKey(b.PrivateRSAKeyFilepath)
+		var err error
+		rsaKey, err = cryptography.LoadPrivateKey(b.PrivateRSAKeyFilepath)
 		if err != nil {
 			return fmt.Errorf("load private key: %w", err)
 		}
-
-		keypair, err := cryptography.NewKeypair(rsaKey)
-		if err != nil {
-			return fmt.Errorf("keypair: %w", err)
-		}
-
-		config.Keypair = keypair
 	}
 
+	previous := append([]*rsa.PublicKey{}, b.PreviousRSAPublicKeys...)
+	for _, path := range b.PreviousRSAKeyFilepaths {
+		publicKey, err := cryptography.LoadPublicKey(path)
+		if err != nil {
+			return fmt.Errorf("load previous key: %w", err)
+		}
+
+		previous = append(previous, publicKey)
+	}
+
+	keypair, err := cryptography.NewKeypair(rsaKey, previous...)
+	if err != nil {
+		return fmt.Errorf("keypair: %w", err)
+	}
+
+	config.Keypair = keypair
 	return nil
 }
 
 func (b *Builder) assignStores(config *domain.Config) error {
 	var (
-		clientStore  domain.ClientStore
-		grantStore   domain.GrantStore
-		sessionStore domain.SessionStore
-		userStore    domain.UserStore
-		mfaStore     domain.MFACodeStore
-		sqlite       *sql.DB
-		err          error
+		clientStore      domain.ClientStore
+		grantStore       domain.GrantStore
+		sessionStore     domain.SessionStore
+		userStore        domain.UserStore
+		userBlockedStore domain.UserBlockedStore
+		mfaStore         domain.MFACodeStore
+		sqlite           *sql.DB
+		err              error
 	)
 
 	if b.sqliteFilepath != "" {
@@ -358,28 +453,22 @@ func (b *Builder) assignStores(config *domain.Config) error {
 	}
 
 	switch {
-	case b.ldapServer != "":
-		userStore = stores.NewLDAPUserStore(
-			b.ldapServer,
-			b.ldapBind,
-			b.ldapPassword,
-			b.ldapFilterDN,
-			b.ldapBaseDN,
-			b.ldapSubjectAttribute,
-			b.ldapNameAttribute,
-			b.ldapEmailAttribute,
-			b.ldapPhoneAttribute,
-			b.ldapAddressAttribute,
-		)
+	case b.ldap != nil:
+		userStore = stores.NewLDAPUserStore(*b.ldap)
+	case b.sqliteUseInUsers:
+		userStore = stores.NewSqliteUserStore(sqlite)
 	case b.UserStore == nil:
 		userStore = stores.NewUserStore()
 	default:
 		userStore = b.UserStore
 	}
 
-	if b.ClientStore == nil {
+	switch {
+	case b.sqliteUseInClients:
+		clientStore = stores.NewSqliteClientStore(sqlite, b.MasterKey)
+	case b.ClientStore == nil:
 		clientStore = stores.NewClientStore()
-	} else {
+	default:
 		clientStore = b.ClientStore
 	}
 
@@ -410,11 +499,28 @@ func (b *Builder) assignStores(config *domain.Config) error {
 		mfaStore = b.MFACodeStore
 	}
 
+	switch {
+	case b.UserBlockedStore == nil:
+		userBlockedStore = stores.NewUserBlockedStore()
+	default:
+		userBlockedStore = b.UserBlockedStore
+	}
+
 	config.ClientStore = clientStore
 	config.GrantStore = grantStore
 	config.SessionStore = sessionStore
 	config.UserStore = userStore
 	config.MFACodeStore = mfaStore
+	config.UserBlockedStore = userBlockedStore
+
+	switch {
+	case b.sqliteUseInClientAssertions:
+		config.ClientAssertionStore = stores.NewSqliteClientAssertionStore(sqlite)
+	case b.ClientAssertionStore == nil:
+		config.ClientAssertionStore = stores.NewClientAssertionStore()
+	default:
+		config.ClientAssertionStore = b.ClientAssertionStore
+	}
 
 	return nil
 }
@@ -435,9 +541,34 @@ func (b *Builder) seedData(config *domain.Config) error {
 	return nil
 }
 
+// seedClients adds the clients of the configuration that do not exist, so the
+// changes made in the admin web to the clients stored in SQLite are kept
 func (b *Builder) seedClients(clientStore domain.ClientStore) error {
 	for _, c := range b.Clients {
-		_, err := clientStore.NewClient(c.ID, c.SecretHash, c.RedirectURIs)
+		if _, err := clientStore.GetClientByID(c.ID); err == nil {
+			continue
+		}
+
+		publicKeys := append([]crypto.PublicKey{}, c.PublicKeys...)
+		for _, path := range c.PublicKeyPaths {
+			key, err := cryptography.LoadAnyPublicKey(path)
+			if err != nil {
+				return fmt.Errorf("seed clients: %w", err)
+			}
+
+			publicKeys = append(publicKeys, key)
+		}
+
+		_, err := clientStore.NewClient(domain.ClientData{
+			ID:                      c.ID,
+			SecretHash:              c.SecretHash,
+			Secret:                  c.Secret,
+			RedirectURIs:            c.RedirectURIs,
+			PostLogoutRedirectURIs:  c.PostLogoutRedirectURIs,
+			TokenEndpointAuthMethod: c.TokenEndpointAuthMethod,
+			JWKSURI:                 c.JWKSURI,
+			PublicKeys:              publicKeys,
+		})
 		if err != nil {
 			return fmt.Errorf("seed clients: %w", err)
 		}
@@ -446,11 +577,74 @@ func (b *Builder) seedClients(clientStore domain.ClientStore) error {
 	return nil
 }
 
+// seedUsers adds the users of the configuration that do not exist, so the
+// changes made in the admin web to the users stored in SQLite are kept
 func (b *Builder) seedUsers(userStore domain.UserStore) error {
 	for _, u := range b.Users {
-		_, err := userStore.NewUser(u.Subject, u.Email, u.PreferredUsername, u.Phone, u.Address, u.Groups, u.PasswordHash)
+		if _, err := userStore.GetUserByID(u.Subject); err == nil {
+			continue
+		}
+
+		_, err := userStore.NewUser(domain.UserData{
+			Subject:           u.Subject,
+			Email:             u.Email,
+			EmailVerified:     u.EmailVerified,
+			PreferredUsername: u.PreferredUsername,
+			Name:              u.Name,
+			GivenName:         u.GivenName,
+			FamilyName:        u.FamilyName,
+			Phone:             u.Phone,
+			Address:           u.Address,
+			Groups:            u.Groups,
+			PasswordHash:      u.PasswordHash,
+		})
 		if err != nil {
 			return fmt.Errorf("seed users: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// issuerBasePath validates the issuer (OIDC Discovery section 3: an URL with
+// scheme and host, without query or fragment) and returns its path without
+// trailing slash, where the endpoints are published.
+func issuerBasePath(issuer string) (string, error) {
+	u, err := url.Parse(issuer)
+	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.RawQuery != "" || u.Fragment != "" {
+		return "", fmt.Errorf("issuer must be an http(s) URL without query or fragment: %s", issuer)
+	}
+
+	return strings.TrimSuffix(u.Path, "/"), nil
+}
+
+func (b *Builder) validateLDAPServer() error {
+	c := b.LDAPServer
+	switch {
+	case c.BaseDN == "":
+		return errors.New("ldap server: base_dn is required")
+	case b.ldap != nil:
+		return errors.New("ldap server: it cannot serve the users of another LDAP server")
+	case c.BindDN != "" && c.BindPasswordHash == "":
+		return errors.New("ldap server: bind_password_hash is required with bind_dn")
+	case c.TLSMode != domain.LDAPTLSNone && (c.TLSCertPath == "" || c.TLSKeyPath == ""):
+		return errors.New("ldap server: the tls cert_path and key_path are required")
+	}
+
+	switch c.TLSMode {
+	case domain.LDAPTLSNone, domain.LDAPTLSLDAPS, domain.LDAPTLSStartTLS:
+		return nil
+	default:
+		return fmt.Errorf("ldap server: unsupported tls mode %q (use ldaps or starttls)", c.TLSMode)
+	}
+}
+
+// validateTemplates checks that the template files exist, so a wrong path or
+// working directory fails with a clear error on start up
+func (b *Builder) validateTemplates() error {
+	for _, path := range []string{b.BaseTemplateFilepath, b.LoginTemplateFilepath, b.MFACreateTemplateFilepath, b.MFAVerifyTemplateFilepath, b.LogoutTemplateFilepath} {
+		if _, err := os.Stat(path); err != nil {
+			return fmt.Errorf("template not found: %s (the paths are relative to the working directory)", path)
 		}
 	}
 

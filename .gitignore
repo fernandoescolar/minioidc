@@ -3,3 +3,7 @@ bin
 obj
 *.pem
 *.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+.vscode
+internal/admin/ui/dist

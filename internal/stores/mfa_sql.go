@@ -2,6 +2,7 @@ package stores
 
 import (
 	"database/sql"
+	"log"
 
 	"github.com/fernandoescolar/minioidc/pkg/domain"
 )
@@ -39,19 +40,12 @@ func (ms *sqlMFACodeStore) NewMFACode(id string, user domain.User, secret, metho
 
 // UserHasMFACodes checks if a User has any MFACodes
 func (ms *sqlMFACodeStore) UserHasMFACodes(userID string) (bool, error) {
-	var hasMFACodes bool
-	rows, err := ms.db.Query("SELECT id, userID, secret, method FROM mfa WHERE userID = ?;", userID)
-	if err != nil {
+	var count int
+	if err := ms.db.QueryRow("SELECT COUNT(*) FROM mfa WHERE userID = ?;", userID).Scan(&count); err != nil {
 		return false, err
 	}
 
-	defer rows.Close()
-	for rows.Next() {
-		hasMFACodes = true
-		break
-	}
-
-	return hasMFACodes, nil
+	return count > 0, nil
 }
 
 // GetMFACodeByUserID looks up MFACodes by UserID
@@ -62,15 +56,25 @@ func (ms *sqlMFACodeStore) GetMFACodeByUserID(userID string) ([]domain.MFACode, 
 		return nil, err
 	}
 
-	defer rows.Close()
+	// all the rows are read before looking up the user: the SQLite connection
+	// is busy while the rows are open, and the users can be in SQLite too
+	var codes []*miniMFACode
 	for rows.Next() {
 		mfaCode := &miniMFACode{}
-		err = rows.Scan(&mfaCode.id, &mfaCode.userID, &mfaCode.secret, &mfaCode.method)
-		if err != nil {
+		if err := rows.Scan(&mfaCode.id, &mfaCode.userID, &mfaCode.secret, &mfaCode.method); err != nil {
+			rows.Close()
 			return nil, err
 		}
 
-		mfa, err := ms.MFACode(mfaCode)
+		codes = append(codes, mfaCode)
+	}
+
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+
+	for _, code := range codes {
+		mfa, err := ms.MFACode(code)
 		if err != nil {
 			return nil, err
 		}
@@ -83,7 +87,9 @@ func (ms *sqlMFACodeStore) GetMFACodeByUserID(userID string) ([]domain.MFACode, 
 
 // DeleteUserMFACodes deletes all MFACodes for a User
 func (ms *sqlMFACodeStore) DeleteUserMFACodes(userID string) {
-	ms.db.Exec("DELETE FROM mfa WHERE userID = ?;", userID)
+	if _, err := ms.db.Exec("DELETE FROM mfa WHERE userID = ?;", userID); err != nil {
+		log.Printf("WRN DeleteUserMFACodes: %v", err)
+	}
 }
 
 // MFACode converts a miniMFACode to a MFACode

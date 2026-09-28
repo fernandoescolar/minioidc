@@ -1,0 +1,38 @@
+@import "tailwindcss";
+
+/* reusable classes: @utility lets them be used with @apply and with variants */
+@utility btn {
+  @apply inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 disabled:cursor-not-allowed disabled:opacity-50;
+}
+
+@utility btn-primary {
+  @apply btn bg-indigo-600 text-white hover:bg-indigo-500;
+}
+
+@utility btn-secondary {
+  @apply btn border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800;
+}
+
+@utility btn-danger {
+  @apply btn bg-red-600 text-white hover:bg-red-500;
+}
+
+@utility btn-ghost {
+  @apply btn px-2 text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100;
+}
+
+@utility input {
+  @apply block w-full rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm shadow-xs placeholder:text-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 disabled:bg-slate-100 disabled:text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:disabled:bg-slate-800;
+}
+
+@utility label {
+  @apply mb-1 block text-sm font-medium text-slate-700 dark:text-slate-300;
+}
+
+@utility card {
+  @apply rounded-lg border border-slate-200 bg-white shadow-xs dark:border-slate-800 dark:bg-slate-900;
+}
+
+@utility badge {
+  @apply inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium;
+}

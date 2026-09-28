@@ -1,15 +1,15 @@
-# http://localhost:8000/connect/authorize?client_id=myclient&response_type=code&scope=openid%20profile%20email%20offline_access&code_challenge=pHEZOnt9SDir39wPbXSr0bxiBtkAQFISimcAuVCTkh8&code_challenge_method=S256&redirect_uri=http://localhost:5000/callback&state=1234zyx
+# http://localhost:8000/authorize?client_id=myclient&response_type=code&scope=openid%20profile%20email%20offline_access&code_challenge=pHEZOnt9SDir39wPbXSr0bxiBtkAQFISimcAuVCTkh8&code_challenge_method=S256&redirect_uri=http://localhost:5000/callback&state=1234zyx
 
 @host = localhost:8000
 @redirect_uri = http://localhost:5000/callback
 @client_id = myclient
 @client_secret = secret
-@scope = openid%20profile%20email%20offline_access
+@scope = openid%20profile%20email%20address%20phone%20offline_access
 @code_challenge = pHEZOnt9SDir39wPbXSr0bxiBtkAQFISimcAuVCTkh8
 @code_challenge_method = S256
 @code_verifier = 7073d688b6dcb02b9a2332e0792be265b9168fda7a6
 @state = 1234zyx
-@authorizeLocation = /connect/authorize?client_id={{client_id}}&response_type=code&scope={{scope}}&code_challenge={{code_challenge}}&code_challenge_method={{code_challenge_method}}&redirect_uri={{redirect_uri}}&state={{state}}
+@authorizeLocation = /authorize?client_id={{client_id}}&response_type=code&scope={{scope}}&code_challenge={{code_challenge}}&code_challenge_method={{code_challenge_method}}&redirect_uri={{redirect_uri}}&state={{state}}
 
 # @name start_challenge
 GET {{authorizeLocation}} HTTP/1.1
@@ -52,7 +52,7 @@ Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0
 ###
 
 # @name token_by_code
-POST /connect/token HTTP/1.1
+POST /token HTTP/1.1
 Host: {{host}}
 Accept: application/json
 Content-Type: application/x-www-form-urlencoded
@@ -67,7 +67,7 @@ grant_type=authorization_code
 
 @refresh_token = {{token_by_code.response.body.refresh_token}}
 
-POST /connect/token HTTP/1.1
+POST /token HTTP/1.1
 Host: localhost:8000
 Accept: application/json
 Content-Type: application/x-www-form-urlencoded
@@ -79,7 +79,7 @@ grant_type=refresh_token
 
 ###
 
-POST /connect/token HTTP/1.1
+POST /token HTTP/1.1
 Host: localhost:8000
 Accept: application/json
 Content-Type: application/x-www-form-urlencoded

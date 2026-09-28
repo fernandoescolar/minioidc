@@ -7,12 +7,6 @@ import (
 	"github.com/fernandoescolar/minioidc/pkg/domain"
 )
 
-type miniClient struct {
-	id           string
-	secretHash   string
-	redirectUrls []string
-}
-
 type miniClientStore struct {
 	sync.Map
 }
@@ -23,15 +17,13 @@ func NewClientStore() domain.ClientStore {
 }
 
 // NewClient creates a new Client
-func (cs *miniClientStore) NewClient(id string, secretHash string, redirectUris []string) (domain.Client, error) {
-	client := &miniClient{
-		id:           id,
-		secretHash:   secretHash,
-		redirectUrls: redirectUris,
+func (cs *miniClientStore) NewClient(data domain.ClientData) (domain.Client, error) {
+	if err := domain.ValidateClientData(data); err != nil {
+		return nil, err
 	}
 
-	cs.Store(client.id, client)
-	return client.toClient()
+	cs.Store(data.ID, data)
+	return domain.NewClient(data), nil
 }
 
 // GetClientByID looks up the Client
@@ -41,10 +33,5 @@ func (cs *miniClientStore) GetClientByID(id string) (domain.Client, error) {
 		return nil, errors.New("client not found")
 	}
 
-	client := v.(*miniClient)
-	return client.toClient()
-}
-
-func (c *miniClient) toClient() (domain.Client, error) {
-	return domain.NewClient(c.id, c.secretHash, c.redirectUrls), nil
+	return domain.NewClient(v.(domain.ClientData)), nil
 }

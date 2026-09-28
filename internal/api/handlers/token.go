@@ -1,15 +1,14 @@
 package handlers
 
 import (
-	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/fernandoescolar/minioidc/internal/api/utils"
-	"github.com/fernandoescolar/minioidc/internal/stores"
 	"github.com/fernandoescolar/minioidc/pkg/cryptography"
 	"github.com/fernandoescolar/minioidc/pkg/domain"
 )
@@ -23,37 +22,38 @@ type TokenHandler struct {
 	now                func() time.Time
 	issuer             string
 	audience           string
-	masterKey          string
 	reUseRefreshTokens bool
 	keypair            *cryptography.Keypair
 	accessTTL          time.Duration
 	refreshTTL         time.Duration
-	clientStore        domain.ClientStore
 	grantStore         domain.GrantStore
+	authenticator      ClientAuthenticator
+	endpointURL        string
 }
 
 type tokenResponse struct {
-	AccessToken  string        `json:"access_token,omitempty"`
-	RefreshToken string        `json:"refresh_token,omitempty"`
-	IDToken      string        `json:"id_token,omitempty"`
-	TokenType    string        `json:"token_type"`
-	ExpiresIn    time.Duration `json:"expires_in"`
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token,omitempty"`
+	IDToken      string `json:"id_token,omitempty"`
+	TokenType    string `json:"token_type"`
+	ExpiresIn    int64  `json:"expires_in"`
+	Scope        string `json:"scope,omitempty"`
 }
 
 var _ http.Handler = (*TokenHandler)(nil)
 
-func NewTokenHandler(config *domain.Config, now func() time.Time) *TokenHandler {
+func NewTokenHandler(config *domain.Config, now func() time.Time, authenticator ClientAuthenticator, endpointURL string) *TokenHandler {
 	return &TokenHandler{
 		now:                now,
 		issuer:             config.Issuer,
 		audience:           config.Audience,
-		masterKey:          config.MasterKey,
 		reUseRefreshTokens: config.ReuseRefreshTokens,
 		keypair:            config.Keypair,
 		accessTTL:          config.AccessTTL,
 		refreshTTL:         config.RefreshTTL,
-		clientStore:        config.ClientStore,
 		grantStore:         config.GrantStore,
+		authenticator:      authenticator,
+		endpointURL:        endpointURL,
 	}
 }
 
@@ -63,250 +63,197 @@ func (h *TokenHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := r.ParseForm()
-	if err != nil {
-		utils.InternalServerError(w, err.Error())
+	if err := r.ParseForm(); err != nil {
+		utils.Error(w, utils.InvalidRequest, "Invalid form", http.StatusBadRequest)
 		return
 	}
 
-	grantType := r.Form.Get("grant_type")
+	client, ok := authenticateClient(h.authenticator, h.endpointURL, w, r)
+	if !ok {
+		return
+	}
+
+	grantType := r.PostForm.Get("grant_type")
 	switch grantType {
 	case "authorization_code":
-		h.requestWithCode(w, r)
-		return
+		h.requestWithCode(w, r, client)
 	case "refresh_token":
-		h.requestWithRefresh(w, r)
-		return
+		h.requestWithRefresh(w, r, client)
 	default:
-		utils.Error(w, utils.InvalidRequest, fmt.Sprintf("Invalid grant type: %s", grantType), http.StatusBadRequest)
+		utils.Error(w, utils.UnsupportedGrantType, fmt.Sprintf("Invalid grant type: %s", grantType), http.StatusBadRequest)
+	}
+}
+
+func (h *TokenHandler) requestWithCode(w http.ResponseWriter, r *http.Request, client domain.Client) {
+	if !assertPresenceInForm([]string{"code", "redirect_uri"}, w, r) {
 		return
 	}
-}
 
-func (h *TokenHandler) requestWithCode(w http.ResponseWriter, r *http.Request) bool {
-	grant, valid := h.validateCodeGrant(w, r)
-	if !valid {
-		return false
+	grant, ok := h.consumeGrant(w, r.PostForm.Get("code"), domain.GrantTypeCode, client)
+	if !ok {
+		return
 	}
 
-	if !h.validateCodeChallenge(w, r, grant) {
-		return false
+	// RFC 6749 section 4.1.3: it must be identical to the one of the authorization request
+	if r.PostForm.Get("redirect_uri") != grant.RedirectURI() {
+		utils.Error(w, utils.InvalidGrant, "Invalid redirect uri", http.StatusBadRequest)
+		return
 	}
 
-	tokens := &tokenResponse{
-		TokenType: "bearer",
-		ExpiresIn: h.accessTTL,
-	}
-	var err error
-
-	tokens.AccessToken, err = grant.AccessToken(h.issuer, h.audience, h.accessTTL, h.keypair, h.now())
-	if err != nil {
-		log.Println("Error: creating access token: %w", err)
-		utils.InternalServerError(w, err.Error())
-		return false
+	if grant.CodeChallenge() != "" &&
+		!cryptography.VerifyCodeChallenge(grant.CodeChallengeMethod(), grant.CodeChallenge(), r.PostForm.Get("code_verifier")) {
+		utils.Error(w, utils.InvalidGrant, "Invalid code verifier", http.StatusBadRequest)
+		return
 	}
 
-	if len(grant.Scopes()) > 0 && grant.Scopes()[0] == openidScope {
-		tokens.IDToken, err = grant.IDToken(h.issuer, h.audience, h.refreshTTL, h.keypair, h.now())
+	refreshToken := ""
+	if grant.HasScope(offlineAccessScope) {
+		var err error
+		refreshToken, err = h.createRefreshToken(grant)
 		if err != nil {
-			log.Println("Error: creating id token: %w", err)
 			utils.InternalServerError(w, err.Error())
-			return false
+			return
 		}
 	}
 
-	if containsOfflineAccess(grant.Scopes()) {
-		id, success := h.createRefreshToken(w, grant)
-		if !success {
-			return false
-		}
-
-		tokens.RefreshToken = id
-	}
-
-	resp, err := json.Marshal(tokens)
-	if err != nil {
-		log.Println("Error: marshaling tokens: %w", err)
-		utils.InternalServerError(w, err.Error())
-		return false
-	}
-
-	utils.NoCache(w)
-	utils.JSON(w, resp)
-
-	return true
+	h.writeTokens(w, grant, refreshToken)
 }
 
-func (h *TokenHandler) requestWithRefresh(w http.ResponseWriter, r *http.Request) bool {
-	grant, valid := h.validateRefreshGrant(w, r)
-	if !valid {
-		return false
+func (h *TokenHandler) requestWithRefresh(w http.ResponseWriter, r *http.Request, client domain.Client) {
+	if !assertPresenceInForm([]string{"refresh_token"}, w, r) {
+		return
 	}
 
-	tokens := &tokenResponse{
-		TokenType: "bearer",
-		ExpiresIn: h.accessTTL,
-	}
-
+	refreshToken := r.PostForm.Get("refresh_token")
+	var (
+		grant domain.Grant
+		ok    bool
+	)
 	if h.reUseRefreshTokens {
-		tokens.RefreshToken = r.Form.Get("refresh_token")
+		grant, ok = h.getGrant(w, refreshToken, domain.GrantTypeRefresh, client)
 	} else {
-		id, success := h.createRefreshToken(w, grant)
-		if !success {
-			log.Println("Error creating new refresh token")
-			utils.InternalServerError(w, "Error creating new refresh token")
-			return false
-		}
-
-		tokens.RefreshToken = id
+		grant, ok = h.consumeGrant(w, refreshToken, domain.GrantTypeRefresh, client)
+	}
+	if !ok {
+		return
 	}
 
-	var err error
-
-	tokens.AccessToken, err = grant.AccessToken(h.issuer, h.audience, h.accessTTL, h.keypair, h.now())
-	if err != nil {
-		utils.InternalServerError(w, err.Error())
-		return false
-	}
-
-	if len(grant.Scopes()) > 0 && grant.Scopes()[0] == openidScope {
-		tokens.IDToken, err = grant.IDToken(h.issuer, h.audience, h.refreshTTL, h.keypair, h.now())
+	if !h.reUseRefreshTokens {
+		var err error
+		refreshToken, err = h.createRefreshToken(grant)
 		if err != nil {
 			utils.InternalServerError(w, err.Error())
-			return false
+			return
 		}
 	}
 
-	resp, err := json.Marshal(tokens)
-	if err != nil {
-		utils.InternalServerError(w, err.Error())
-		return false
-	}
-
-	utils.NoCache(w)
-	utils.JSON(w, resp)
-
-	return true
+	h.writeTokens(w, grant, refreshToken)
 }
 
-func (h *TokenHandler) validateCodeGrant(w http.ResponseWriter, r *http.Request) (domain.Grant, bool) {
-	if !assertPresenceInForm([]string{"code", "redirect_uri"}, w, r) {
-		return nil, false
-	}
-	equal := assertEqualInForm("grant_type", "authorization_code", utils.UnsupportedGrantType, "Invalid grant type", w, r)
-	if !equal {
-		return nil, false
-	}
-
-	code := r.Form.Get("code")
-	code, err := cryptography.Decrypts(h.masterKey, code)
+// getGrant looks up a valid grant issued to the client
+func (h *TokenHandler) getGrant(w http.ResponseWriter, token string, grantType domain.GrantType, client domain.Client) (domain.Grant, bool) {
+	grant, err := h.grantStore.GetGrantByIDAndType(cryptography.SHA256(token), grantType)
 	if err != nil {
-		log.Println("Error: getting code: %w", err)
-		utils.InternalServerError(w, err.Error())
+		utils.Error(w, utils.InvalidGrant, "Invalid or expired grant", http.StatusBadRequest)
 		return nil, false
 	}
 
-	code = cryptography.SHA256(code)
-	grant, err := h.grantStore.GetGrantByIDAndType(code, domain.GrantTypeCode)
-	if err != nil || grant.HasBeenGranted() {
-		utils.Error(w, utils.InvalidGrant, fmt.Sprintf("Invalid code: %s", code), http.StatusUnauthorized)
+	if grant.Used() {
+		h.revokeReplayedGrant(grant)
+		utils.Error(w, utils.InvalidGrant, "Invalid or expired grant", http.StatusBadRequest)
 		return nil, false
 	}
 
-	redirectURI := r.Form.Get("redirect_uri")
-	if !grant.Client().RedirectURLIsValid(redirectURI) {
-		utils.Error(w, utils.InvalidRequest, "Invalid redirect uri", http.StatusBadRequest)
+	now := h.now()
+	if grant.HasExpired(now) || grant.Session().HasExpired(now) || grant.Client().ClientID() != client.ClientID() {
+		utils.Error(w, utils.InvalidGrant, "Invalid or expired grant", http.StatusBadRequest)
+		return nil, false
+	}
+
+	return grant, true
+}
+
+// consumeGrant looks up a valid grant and consumes it, so it can only be used once
+func (h *TokenHandler) consumeGrant(w http.ResponseWriter, token string, grantType domain.GrantType, client domain.Client) (domain.Grant, bool) {
+	grant, ok := h.getGrant(w, token, grantType, client)
+	if !ok {
 		return nil, false
 	}
 
 	if err := h.grantStore.Grant(grant.ID()); err != nil {
-		log.Println("Error granting code:", err)
+		// another request consumed it at the same time
+		h.revokeReplayedGrant(grant)
+		utils.Error(w, utils.InvalidGrant, "Invalid or expired grant", http.StatusBadRequest)
+		return nil, false
 	}
 
 	return grant, true
 }
 
-func (h *TokenHandler) validateCodeChallenge(w http.ResponseWriter, r *http.Request, grant domain.Grant) bool {
-	if grant.CodeChallenge() == "" || grant.CodeChallengeMethod() == "" {
-		return true
+// revokeReplayedGrant revokes the refresh tokens issued from a code or a
+// rotated refresh token that is used twice (RFC 6749 section 4.1.2 and
+// RFC 9700 section 4.14.2): one of the requests could be from an attacker.
+func (h *TokenHandler) revokeReplayedGrant(grant domain.Grant) {
+	log.Printf("WRN %s grant used twice: revoking the tokens issued from it", grant.GrantType())
+	if err := h.grantStore.RevokeFamily(grant.FamilyID()); err != nil {
+		log.Printf("Error: revoking grant family: %v", err)
 	}
-
-	codeVerifier := r.Form.Get("code_verifier")
-	if codeVerifier == "" {
-		utils.Error(w, utils.InvalidGrant, "Invalid code verifier. Expected code but client sent none.", http.StatusUnauthorized)
-		return false
-	}
-
-	challenge, err := cryptography.GenerateCodeChallenge(grant.CodeChallengeMethod(), codeVerifier)
-	if err != nil {
-		utils.Error(w, utils.InvalidRequest, fmt.Sprintf("Invalid code verifier. %v", err.Error()), http.StatusUnauthorized)
-		return false
-	}
-
-	if challenge != grant.CodeChallenge() {
-		utils.Error(w, utils.InvalidGrant, "Invalid code verifier. Code challenge did not match hashed code verifier.", http.StatusUnauthorized)
-		return false
-	}
-
-	return true
 }
 
-func (h *TokenHandler) validateRefreshGrant(w http.ResponseWriter, r *http.Request) (domain.Grant, bool) {
-	if !assertPresenceInForm([]string{"refresh_token"}, w, r) {
-		return nil, false
-	}
-
-	equal := assertEqualInForm("grant_type", "refresh_token", utils.UnsupportedGrantType, "Invalid grant type", w, r)
-	if !equal {
-		return nil, false
-	}
-
-	if !assertPresenceInForm([]string{"client_id", "client_secret"}, w, r) {
-		return nil, false
-	}
-
-	_, err := h.clientStore.GetClientByID(r.Form.Get("client_id"))
+func (h *TokenHandler) writeTokens(w http.ResponseWriter, grant domain.Grant, refreshToken string) {
+	now := h.now()
+	accessToken, err := grant.AccessToken(h.issuer, h.audience, h.accessTTL, h.keypair, now)
 	if err != nil {
-		utils.Error(w, utils.InvalidClient, "Invalid client id", http.StatusUnauthorized)
-		return nil, false
+		utils.InternalServerError(w, fmt.Sprintf("creating access token: %v", err))
+		return
 	}
 
-	// validSecret := client.ClientSecretIsValid(req.Form.Get("client_secret"))
-	// if !validSecret {
-	// 	errorResponse(rw, InvalidClient, "Invalid client secret", http.StatusUnauthorized)
-	// 	return nil, false
-	// }
+	tokens := &tokenResponse{
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
+		TokenType:    "Bearer",
+		ExpiresIn:    int64(h.accessTTL.Seconds()),
+		Scope:        strings.Join(grant.Scopes(), " "),
+	}
 
-	refreshToken := r.Form.Get("refresh_token")
-	dr, err := cryptography.Decrypts(h.masterKey, refreshToken)
+	if grant.HasScope(openidScope) {
+		tokens.IDToken, err = grant.IDToken(h.issuer, h.accessTTL, h.keypair, now, accessToken)
+		if err != nil {
+			utils.InternalServerError(w, fmt.Sprintf("creating id token: %v", err))
+			return
+		}
+	}
+
+	resp, err := json.Marshal(tokens)
 	if err != nil {
-		log.Println("Error: getting refresh token: %w", err)
-		utils.InternalServerError(w, err.Error())
-		return nil, false
+		utils.InternalServerError(w, fmt.Sprintf("marshaling tokens: %v", err))
+		return
 	}
 
-	hr := cryptography.SHA256(dr)
-	grant, err := h.grantStore.GetGrantByIDAndType(hr, domain.GrantTypeRefresh)
-	if err != nil {
-		utils.Error(w, utils.InvalidGrant, "Invalid refresh token",
-			http.StatusUnauthorized)
-		return nil, false
-	}
-
-	if !h.reUseRefreshTokens {
-		h.grantStore.Grant(grant.ID())
-	}
-
-	return grant, true
+	utils.JSON(w, resp)
 }
 
-func assertPresenceInForm(params []string, rw http.ResponseWriter, req *http.Request) bool {
+func (h *TokenHandler) createRefreshToken(grant domain.Grant) (string, error) {
+	token, err := cryptography.RandomToken()
+	if err != nil {
+		return "", fmt.Errorf("creating refresh token: %w", err)
+	}
+
+	_, err = h.grantStore.NewRefreshTokenGrant(cryptography.SHA256(token), grant.FamilyID(), grant.Client(), grant.Session(), h.now().Add(h.refreshTTL), grant.Scopes())
+	if err != nil {
+		return "", fmt.Errorf("creating refresh token: %w", err)
+	}
+
+	return token, nil
+}
+
+func assertPresenceInForm(params []string, w http.ResponseWriter, r *http.Request) bool {
 	for _, param := range params {
-		if req.Form.Get(param) != "" {
+		if r.PostForm.Get(param) != "" {
 			continue
 		}
 		utils.Error(
-			rw,
+			w,
 			utils.InvalidRequest,
 			fmt.Sprintf("The request is missing the required parameter: %s", param),
 			http.StatusBadRequest,
@@ -314,44 +261,4 @@ func assertPresenceInForm(params []string, rw http.ResponseWriter, req *http.Req
 		return false
 	}
 	return true
-}
-
-func assertEqualInForm(param, value, errorType, errorMsg string, w http.ResponseWriter, r *http.Request) bool {
-	formValue := r.Form.Get(param)
-	if subtle.ConstantTimeCompare([]byte(value), []byte(formValue)) == 0 {
-		utils.Error(w, errorType, fmt.Sprintf("%s: %s", errorMsg, formValue),
-			http.StatusUnauthorized)
-		return false
-	}
-	return true
-}
-
-func containsOfflineAccess(scopes []string) bool {
-	for _, scope := range scopes {
-		if scope == offlineAccessScope {
-			return true
-		}
-	}
-
-	return false
-}
-
-func (h *TokenHandler) createRefreshToken(w http.ResponseWriter, grant domain.Grant) (string, bool) {
-	id := stores.CreateComplexUID()
-	hid := cryptography.SHA256(id)
-	eid, err := cryptography.Encrypts(h.masterKey, id)
-	if err != nil {
-		log.Println("Error: creating refresh token id: %w", err)
-		utils.InternalServerError(w, err.Error())
-		return "", false
-	}
-
-	_, err = h.grantStore.NewRefreshTokenGrant(hid, grant.Client(), grant.Session(), h.now().Add(h.refreshTTL), grant.Scopes())
-	if err != nil {
-		log.Println("Error: creating refresh token: %w", err)
-		utils.InternalServerError(w, err.Error())
-		return "", false
-	}
-
-	return eid, true
 }

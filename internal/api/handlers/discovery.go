@@ -5,7 +5,9 @@ import (
 	"net/http"
 
 	"github.com/fernandoescolar/minioidc/internal/api/utils"
+	"github.com/fernandoescolar/minioidc/internal/clientauth"
 	"github.com/fernandoescolar/minioidc/pkg/cryptography"
+	"github.com/fernandoescolar/minioidc/pkg/domain"
 )
 
 var (
@@ -27,25 +29,51 @@ var (
 		"email",
 		"groups",
 		"profile",
+		"address",
+		"phone",
 		"offline_access",
 	}
 	TokenEndpointAuthMethodsSupported = []string{
-		"client_secret_basic",
-		"client_secret_post",
+		domain.AuthMethodClientSecretBasic,
+		domain.AuthMethodClientSecretPost,
+		domain.AuthMethodClientSecretJWT,
+		domain.AuthMethodPrivateKeyJWT,
+		domain.AuthMethodNone,
 	}
-	ClaimsSupported = []string{
+	// IntrospectionEndpointAuthMethodsSupported: public clients cannot introspect tokens
+	IntrospectionEndpointAuthMethodsSupported = []string{
+		domain.AuthMethodClientSecretBasic,
+		domain.AuthMethodClientSecretPost,
+		domain.AuthMethodClientSecretJWT,
+		domain.AuthMethodPrivateKeyJWT,
+	}
+	TokenEndpointAuthSigningAlgValuesSupported = append(append([]string{}, clientauth.AsymmetricAlgorithms...), clientauth.HMACAlgorithms...)
+	ClaimsSupported                            = []string{
 		"sub",
 		"email",
 		"email_verified",
 		"preferred_username",
+		"name",
+		"given_name",
+		"family_name",
 		"phone_number",
 		"address",
 		"groups",
 		"iss",
 		"aud",
+		"exp",
+		"iat",
+		"auth_time",
+		"nonce",
+		"azp",
+		"at_hash",
+		"sid",
+		"amr",
+	}
+	ResponseModesSupported = []string{
+		"query",
 	}
 	CodeChallengeMethodsSupported = []string{
-		cryptography.CodeChallengeMethodPlain,
 		cryptography.CodeChallengeMethodS256,
 	}
 )
@@ -56,6 +84,9 @@ type DiscoveryHandler struct {
 	tokenEndpoint         string
 	jwksEndpoint          string
 	userinfoEndpoint      string
+	endSessionEndpoint    string
+	revocationEndpoint    string
+	introspectionEndpoint string
 }
 
 type discoveryResponse struct {
@@ -64,6 +95,9 @@ type discoveryResponse struct {
 	TokenEndpoint         string `json:"token_endpoint"`
 	JWKSUri               string `json:"jwks_uri"`
 	UserinfoEndpoint      string `json:"userinfo_endpoint"`
+	EndSessionEndpoint    string `json:"end_session_endpoint"`
+	RevocationEndpoint    string `json:"revocation_endpoint"`
+	IntrospectionEndpoint string `json:"introspection_endpoint"`
 
 	GrantTypesSupported               []string `json:"grant_types_supported"`
 	ResponseTypesSupported            []string `json:"response_types_supported"`
@@ -73,17 +107,45 @@ type discoveryResponse struct {
 	TokenEndpointAuthMethodsSupported []string `json:"token_endpoint_auth_methods_supported"`
 	ClaimsSupported                   []string `json:"claims_supported"`
 	CodeChallengeMethodsSupported     []string `json:"code_challenge_methods_supported"`
+	RevocationEndpointAuthMethods     []string `json:"revocation_endpoint_auth_methods_supported"`
+	IntrospectionEndpointAuthMethods  []string `json:"introspection_endpoint_auth_methods_supported"`
+
+	TokenEndpointAuthSigningAlgs         []string `json:"token_endpoint_auth_signing_alg_values_supported"`
+	RevocationEndpointAuthSigningAlgs    []string `json:"revocation_endpoint_auth_signing_alg_values_supported"`
+	IntrospectionEndpointAuthSigningAlgs []string `json:"introspection_endpoint_auth_signing_alg_values_supported"`
+	ResponseModesSupported               []string `json:"response_modes_supported"`
+	PromptValuesSupported                []string `json:"prompt_values_supported"`
+
+	// request_uri_parameter_supported is true by default, so it must be declared
+	RequestParameterSupported         bool `json:"request_parameter_supported"`
+	RequestURIParameterSupported      bool `json:"request_uri_parameter_supported"`
+	ClaimsParameterSupported          bool `json:"claims_parameter_supported"`
+	AuthorizationResponseIssSupported bool `json:"authorization_response_iss_parameter_supported"`
 }
 
 var _ http.Handler = (*DiscoveryHandler)(nil)
 
-func NewDiscoveryHandler(issuer string, authorizationEndpoint string, tokenEndpoint string, jwksEndpoint string, userinfoEndpoint string) *DiscoveryHandler {
+// DiscoveryEndpoints are the paths of the endpoints published in the discovery document
+type DiscoveryEndpoints struct {
+	Authorization string
+	Token         string
+	JWKS          string
+	Userinfo      string
+	EndSession    string
+	Revocation    string
+	Introspection string
+}
+
+func NewDiscoveryHandler(issuer string, endpoints DiscoveryEndpoints) *DiscoveryHandler {
 	return &DiscoveryHandler{
 		issuer:                issuer,
-		authorizationEndpoint: authorizationEndpoint,
-		tokenEndpoint:         tokenEndpoint,
-		jwksEndpoint:          jwksEndpoint,
-		userinfoEndpoint:      userinfoEndpoint,
+		authorizationEndpoint: endpoints.Authorization,
+		tokenEndpoint:         endpoints.Token,
+		jwksEndpoint:          endpoints.JWKS,
+		userinfoEndpoint:      endpoints.Userinfo,
+		endSessionEndpoint:    endpoints.EndSession,
+		revocationEndpoint:    endpoints.Revocation,
+		introspectionEndpoint: endpoints.Introspection,
 	}
 }
 
@@ -96,6 +158,9 @@ func (h *DiscoveryHandler) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 		TokenEndpoint:         h.TokenEndpoint(),
 		JWKSUri:               h.JWKSEndpoint(),
 		UserinfoEndpoint:      h.UserinfoEndpoint(),
+		EndSessionEndpoint:    h.issuerWithoutTrailingSlash() + h.endSessionEndpoint,
+		RevocationEndpoint:    h.issuerWithoutTrailingSlash() + h.revocationEndpoint,
+		IntrospectionEndpoint: h.issuerWithoutTrailingSlash() + h.introspectionEndpoint,
 
 		GrantTypesSupported:               GrantTypesSupported,
 		ResponseTypesSupported:            ResponseTypesSupported,
@@ -105,6 +170,15 @@ func (h *DiscoveryHandler) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 		TokenEndpointAuthMethodsSupported: TokenEndpointAuthMethodsSupported,
 		ClaimsSupported:                   ClaimsSupported,
 		CodeChallengeMethodsSupported:     CodeChallengeMethodsSupported,
+		RevocationEndpointAuthMethods:     TokenEndpointAuthMethodsSupported,
+		IntrospectionEndpointAuthMethods:  IntrospectionEndpointAuthMethodsSupported,
+
+		TokenEndpointAuthSigningAlgs:         TokenEndpointAuthSigningAlgValuesSupported,
+		RevocationEndpointAuthSigningAlgs:    TokenEndpointAuthSigningAlgValuesSupported,
+		IntrospectionEndpointAuthSigningAlgs: TokenEndpointAuthSigningAlgValuesSupported,
+		ResponseModesSupported:               ResponseModesSupported,
+		PromptValuesSupported:                []string{promptNone, promptLogin, promptConsent, promptSelectAccount},
+		AuthorizationResponseIssSupported:    true,
 	}
 
 	resp, err := json.Marshal(discovery)

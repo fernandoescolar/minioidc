@@ -1,48 +1,48 @@
 package handlers
 
 import (
-	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/fernandoescolar/minioidc/internal/api/utils"
-	"github.com/fernandoescolar/minioidc/pkg/cryptography"
 	"github.com/fernandoescolar/minioidc/pkg/domain"
-	"github.com/golang-jwt/jwt"
 )
 
 const AuthorizationParts = 2
 
 type UserinfoHandler struct {
-	now        func() time.Time
-	keypair    *cryptography.Keypair
-	grantStore domain.GrantStore
+	validator *accessTokenValidator
 }
 
 var _ http.Handler = (*UserinfoHandler)(nil)
 
 func NewUserinfoHandler(config *domain.Config, now func() time.Time) *UserinfoHandler {
 	return &UserinfoHandler{
-		now:        now,
-		keypair:    config.Keypair,
-		grantStore: config.GrantStore,
+		validator: newAccessTokenValidator(config, now),
 	}
 }
 
 func (h *UserinfoHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	token, authorized := h.authorizeBearer(w, r)
-	if !authorized {
+	if r.Method != http.MethodGet && r.Method != http.MethodPost {
+		utils.Error(w, utils.InvalidRequest, "Invalid request method", http.StatusMethodNotAllowed)
 		return
 	}
 
-	grant, err := h.grantStore.GetGrantByToken(token)
+	accessToken, ok := bearerToken(r)
+	if !ok {
+		w.Header().Set("WWW-Authenticate", `Bearer realm="minioidc"`)
+		utils.Error(w, utils.InvalidRequest, "Missing or invalid access token", http.StatusUnauthorized)
+		return
+	}
+
+	claims, session, err := h.validator.validate(accessToken)
 	if err != nil {
-		utils.InternalServerError(w, err.Error())
+		invalidToken(w, "Invalid token")
 		return
 	}
 
-	resp, err := grant.User().Userinfo(grant.Scopes())
+	resp, err := session.User().Userinfo(strings.Split(claims.Scope, " "))
 	if err != nil {
 		utils.InternalServerError(w, err.Error())
 		return
@@ -51,40 +51,32 @@ func (h *UserinfoHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	utils.JSON(w, resp)
 }
 
-func (h *UserinfoHandler) authorizeBearer(w http.ResponseWriter, r *http.Request) (*jwt.Token, bool) {
+// bearerToken reads the access token from the Authorization header or from
+// the form body of a POST request (RFC 6750 sections 2.1 and 2.2)
+func bearerToken(r *http.Request) (string, bool) {
 	header := r.Header.Get("Authorization")
-	parts := strings.SplitN(header, " ", AuthorizationParts)
-	if len(parts) < AuthorizationParts || parts[0] != "Bearer" {
-		utils.Error(w, utils.InvalidRequest, "Invalid authorization header", http.StatusUnauthorized)
-		return nil, false
+	body := ""
+	if r.Method == http.MethodPost && r.ParseForm() == nil {
+		body = r.PostForm.Get("access_token")
 	}
 
-	return h.authorizeToken(parts[1], w)
+	switch {
+	case header != "" && body != "":
+		// RFC 6750: only one method can be used
+		return "", false
+	case header != "":
+		parts := strings.SplitN(header, " ", AuthorizationParts)
+		if len(parts) < AuthorizationParts || !strings.EqualFold(parts[0], "Bearer") || parts[1] == "" {
+			return "", false
+		}
+
+		return parts[1], true
+	default:
+		return body, body != ""
+	}
 }
 
-func (h *UserinfoHandler) authorizeToken(t string, w http.ResponseWriter) (*jwt.Token, bool) {
-	token, err := h.keypair.VerifyJWT(t)
-	if err != nil {
-		utils.Error(w, utils.InvalidRequest, fmt.Sprintf("Invalid token: %v", err), http.StatusUnauthorized)
-		return nil, false
-	}
-
-	claims, ok := token.Claims.(jwt.MapClaims)
-	if !ok {
-		utils.InternalServerError(w, "Unable to extract token claims")
-		return nil, false
-	}
-
-	exp, ok := claims["exp"].(float64)
-	if !ok {
-		utils.InternalServerError(w, "Unable to extract token expiration")
-		return nil, false
-	}
-
-	if h.now().Unix() > int64(exp) {
-		utils.Error(w, utils.InvalidRequest, "The token is expired", http.StatusUnauthorized)
-		return nil, false
-	}
-
-	return token, true
+func invalidToken(w http.ResponseWriter, description string) {
+	w.Header().Set("WWW-Authenticate", `Bearer realm="minioidc", error="invalid_token"`)
+	utils.Error(w, utils.InvalidToken, description, http.StatusUnauthorized)
 }

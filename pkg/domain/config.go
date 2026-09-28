@@ -14,13 +14,15 @@ type Config struct {
 
 	// is the issuer set in JWTs.
 	Issuer string
+	// is the path of the issuer URL without trailing slash (e.g. "/auth"). All the endpoints are under it.
+	BasePath string
 	// is the audience set in JWTs.
 	Audience string
 	// if true, the server will require MFA for all users.
 	RequireMFA bool
 	// if true, allows re-use refresh tokens in different request
 	ReuseRefreshTokens bool
-	// is the path to the private RSA key used to sign JWTs.
+	// is the RSA keypair used to sign JWTs (with the previous public keys to verify them).
 	Keypair *cryptography.Keypair
 
 	// if true, the server will use HSTS.
@@ -53,8 +55,20 @@ type Config struct {
 	SessionStore SessionStore
 	// is the store used to save users.
 	UserStore UserStore
+	// is the store used to save user blocked.
+	UserBlockedStore UserBlockedStore
 	// is the store used to save MFA codes.
 	MFACodeStore MFACodeStore
+	// is the store used to save the used client assertions (jti).
+	ClientAssertionStore ClientAssertionStore
+
+	// is the configuration of the LDAP server with the users (nil if it is disabled).
+	LDAPServer *LDAPServerConfig
+
+	// if true, the admin web is served at <issuer>/admin/ to the members of AdminGroup.
+	AdminEnabled bool
+	// is the group of the administrators.
+	AdminGroup string
 
 	// is the filepath of the base template.
 	BaseTemplateFilepath string
@@ -64,4 +78,6 @@ type Config struct {
 	MFACreateTemplateFilepath string
 	// the filepath of the MFA template.
 	MFAVerifyTemplateFilepath string
+	// the filepath of the logout template.
+	LogoutTemplateFilepath string
 }

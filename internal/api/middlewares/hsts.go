@@ -12,12 +12,18 @@ type HSTS struct {
 
 var _ domain.Middleware = (*HSTS)(nil)
 
-func NewHSTS(config *domain.Config) *CSP {
-	return &CSP{active: config.UseHSTS}
+func NewHSTS(config *domain.Config) *HSTS {
+	return &HSTS{active: config.UseHSTS}
 }
 
 func (m *HSTS) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
-	if r.URL.Scheme != "https" {
+	if !m.active {
+		next(w, r)
+		return
+	}
+
+	// r.URL.Scheme is set by the ForwardedHeaders middleware behind a proxy
+	if r.TLS == nil && r.URL.Scheme != "https" {
 		http.Redirect(w, r, "https://"+r.Host+r.RequestURI, http.StatusMovedPermanently)
 		return
 	}

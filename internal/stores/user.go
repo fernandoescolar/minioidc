@@ -3,20 +3,16 @@ package stores
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"sync"
 
+	"github.com/fernandoescolar/minioidc/pkg/cryptography"
 	"github.com/fernandoescolar/minioidc/pkg/domain"
 )
 
-type miniUser struct {
-	subject           string
-	email             string
-	preferredUsername string
-	phone             string
-	address           string
-	groups            []string
-	passwordHash      string
-}
+// dummyPasswordHash is compared when the user does not exist, so the response
+// time does not reveal which users exist
+var dummyPasswordHash, _ = cryptography.HashPassword("minioidc-dummy-password")
 
 type miniUserStore struct {
 	sync.Map
@@ -28,19 +24,13 @@ func NewUserStore() domain.UserStore {
 }
 
 // NewUser creates a new User
-func (us *miniUserStore) NewUser(subject, email, preferredUsername, phone, address string, groups []string, passwordHash string) (domain.User, error) {
-	user := &miniUser{
-		subject:           subject,
-		email:             email,
-		preferredUsername: preferredUsername,
-		phone:             phone,
-		address:           address,
-		groups:            groups,
-		passwordHash:      passwordHash,
+func (us *miniUserStore) NewUser(data domain.UserData) (domain.User, error) {
+	if data.Subject == "" {
+		return nil, errors.New("user subject is required")
 	}
 
-	us.Store(user.subject, user)
-	return user.User(), nil
+	us.Store(data.Subject, data)
+	return domain.NewUser(data), nil
 }
 
 // GetUserByID looks up the User
@@ -50,34 +40,34 @@ func (us *miniUserStore) GetUserByID(id string) (domain.User, error) {
 		return nil, errors.New("user not found")
 	}
 
-	user := v.(*miniUser)
-	return user.User(), nil
+	return domain.NewUser(v.(domain.UserData)), nil
 }
 
 // GetUserByUsername looks up a User by their username
 func (us *miniUserStore) GetUserByUsername(username string) (domain.User, error) {
-	var user *miniUser
-	us.Range(func(k, v interface{}) bool {
-		u := v.(*miniUser)
-		if u.preferredUsername == username {
-			user = u
+	var user *domain.UserData
+	us.Range(func(_, v interface{}) bool {
+		u := v.(domain.UserData)
+		if u.PreferredUsername == username {
+			user = &u
 			return false
 		}
 
 		return true
 	})
 
-	if user != nil {
-		return user.User(), nil
+	if user == nil {
+		return nil, errors.New("user not found")
 	}
 
-	return nil, errors.New("user not found")
+	return domain.NewUser(*user), nil
 }
 
 // GetUserByUsernameAndPassword looks up a User by their username and password
 func (us *miniUserStore) GetUserByUsernameAndPassword(username string, password string) (domain.User, error) {
 	user, err := us.GetUserByUsername(username)
 	if err != nil {
+		cryptography.CheckPasswordHash(password, dummyPasswordHash)
 		return nil, fmt.Errorf("GetUserByUsernameAndPassword: %w", err)
 	}
 
@@ -88,11 +78,19 @@ func (us *miniUserStore) GetUserByUsernameAndPassword(username string, password 
 	return nil, errors.New("user not found")
 }
 
+// ListUsers returns all the Users sorted by username
+func (us *miniUserStore) ListUsers() ([]domain.UserData, error) {
+	users := []domain.UserData{}
+	us.Range(func(_, v interface{}) bool {
+		users = append(users, v.(domain.UserData))
+		return true
+	})
+
+	sort.Slice(users, func(i, j int) bool { return users[i].PreferredUsername < users[j].PreferredUsername })
+	return users, nil
+}
+
 // DeleteUser deletes a User from the cache
 func (us *miniUserStore) DeleteUser(id string) {
 	us.Delete(id)
-}
-
-func (u *miniUser) User() domain.User {
-	return domain.NewUser(u.subject, u.email, u.preferredUsername, u.phone, u.address, u.groups, u.passwordHash)
 }

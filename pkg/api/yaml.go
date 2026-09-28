@@ -2,6 +2,7 @@ package api
 
 import (
 	"fmt"
+	"github.com/fernandoescolar/minioidc/pkg/domain"
 	"os"
 	"time"
 
@@ -17,6 +18,8 @@ type YamlConfig struct {
 	RequireMFA         bool   `yaml:"require_mfa"`
 	ReuseRefreshTokens bool   `yaml:"reuse_refresh_tokens"`
 	PrivateRSAKeyPath  string `yaml:"private_rsa_key_path"`
+	// previous signing keys, still published in the JWKS during a key rotation
+	PreviousRSAKeyPaths []string `yaml:"previous_rsa_key_paths"`
 
 	Middlewares struct {
 		HSTS           bool `yaml:"hsts"`
@@ -39,38 +42,76 @@ type YamlConfig struct {
 		Login     string `yaml:"login"`
 		MFACreate string `yaml:"mfa_create"`
 		MFAVerify string `yaml:"mfa_verify"`
+		Logout    string `yaml:"logout"`
 	} `yaml:"templates"`
 
 	Sqlite struct {
-		Filepath      string `yaml:"filepath"`
-		UseInGrants   bool   `yaml:"use_in_grants"`
-		UseInSessions bool   `yaml:"use_in_sessions"`
-		UseInMFA      bool   `yaml:"use_in_mfa"`
+		Filepath              string `yaml:"filepath"`
+		UseInGrants           bool   `yaml:"use_in_grants"`
+		UseInSessions         bool   `yaml:"use_in_sessions"`
+		UseInMFA              bool   `yaml:"use_in_mfa"`
+		UseInClientAssertions bool   `yaml:"use_in_client_assertions"`
+		UseInUsers            bool   `yaml:"use_in_users"`
+		UseInClients          bool   `yaml:"use_in_clients"`
 	} `yaml:"sqlite"`
+	LDAPServer struct {
+		Enabled          bool   `yaml:"enabled"`
+		Address          string `yaml:"address"`
+		BaseDN           string `yaml:"base_dn"`
+		BindDN           string `yaml:"bind_dn"`
+		BindPasswordHash string `yaml:"bind_password_hash"`
+		AllowAnonymous   bool   `yaml:"allow_anonymous"`
+		UsersCanSearch   bool   `yaml:"users_can_search"`
+		TLS              struct {
+			Mode     string `yaml:"mode"`
+			CertPath string `yaml:"cert_path"`
+			KeyPath  string `yaml:"key_path"`
+		} `yaml:"tls"`
+	} `yaml:"ldap_server"`
+
+	Admin struct {
+		Enabled bool   `yaml:"enabled"`
+		Group   string `yaml:"group"`
+	} `yaml:"admin"`
+
 	Ldap struct {
-		Server     string `yaml:"server"`
-		Bind       string `yaml:"bind"`
-		Password   string `yaml:"password"`
-		BaseDN     string `yaml:"base_dn"`
-		FilterDN   string `yaml:"filter_dn"`
-		Attributes struct {
-			Subject string `yaml:"subject"`
-			Name    string `yaml:"name"`
-			Email   string `yaml:"email"`
-			Phone   string `yaml:"phone"`
-			Address string `yaml:"address"`
+		Server        string `yaml:"server"`
+		Bind          string `yaml:"bind"`
+		Password      string `yaml:"password"`
+		BaseDN        string `yaml:"base_dn"`
+		FilterDN      string `yaml:"filter_dn"`
+		EmailVerified bool   `yaml:"email_verified"`
+		Attributes    struct {
+			Subject     string `yaml:"subject"`
+			Name        string `yaml:"name"`
+			DisplayName string `yaml:"display_name"`
+			GivenName   string `yaml:"given_name"`
+			FamilyName  string `yaml:"family_name"`
+			Email       string `yaml:"email"`
+			Phone       string `yaml:"phone"`
+			Address     string `yaml:"address"`
+			Groups      string `yaml:"groups"`
 		} `yaml:"attributes"`
 	} `yaml:"ldap"`
 	Clients []struct {
-		ID           string   `yaml:"id"`
-		SecretHash   string   `yaml:"secret_hash"`
-		RedirectURIs []string `yaml:"redirect_uris"`
+		ID                      string   `yaml:"id"`
+		SecretHash              string   `yaml:"secret_hash"`
+		RedirectURIs            []string `yaml:"redirect_uris"`
+		PostLogoutRedirectURIs  []string `yaml:"post_logout_redirect_uris"`
+		TokenEndpointAuthMethod string   `yaml:"token_endpoint_auth_method"`
+		Secret                  string   `yaml:"secret"`
+		JWKSURI                 string   `yaml:"jwks_uri"`
+		PublicKeyPaths          []string `yaml:"public_key_paths"`
 	} `yaml:"clients"`
 
 	Users []struct {
 		Subject           string   `yaml:"subject"`
 		Email             string   `yaml:"email"`
+		EmailVerified     bool     `yaml:"email_verified"`
 		PreferredUsername string   `yaml:"preferred_username"`
+		Name              string   `yaml:"name"`
+		GivenName         string   `yaml:"given_name"`
+		FamilyName        string   `yaml:"family_name"`
 		PasswordHash      string   `yaml:"password_hash"`
 		Phone             string   `yaml:"phone"`
 		Address           string   `yaml:"address"`
@@ -110,13 +151,27 @@ func NewYamlBuilder(filepath string) (*Builder, error) {
 	if yamlConfig.Sqlite.UseInMFA {
 		sqliteDatabases = sqliteDatabases | MFA
 	}
+	if yamlConfig.Sqlite.UseInClientAssertions {
+		sqliteDatabases = sqliteDatabases | ClientAssertions
+	}
+	if yamlConfig.Sqlite.UseInUsers {
+		sqliteDatabases = sqliteDatabases | Users
+	}
+	if yamlConfig.Sqlite.UseInClients {
+		sqliteDatabases = sqliteDatabases | Clients
+	}
 
 	clients := make([]Client, len(yamlConfig.Clients))
 	for i, c := range yamlConfig.Clients {
 		clients[i] = Client{
-			ID:           c.ID,
-			SecretHash:   c.SecretHash,
-			RedirectURIs: c.RedirectURIs,
+			ID:                      c.ID,
+			SecretHash:              c.SecretHash,
+			RedirectURIs:            c.RedirectURIs,
+			PostLogoutRedirectURIs:  c.PostLogoutRedirectURIs,
+			TokenEndpointAuthMethod: c.TokenEndpointAuthMethod,
+			Secret:                  c.Secret,
+			JWKSURI:                 c.JWKSURI,
+			PublicKeyPaths:          c.PublicKeyPaths,
 		}
 	}
 
@@ -125,7 +180,11 @@ func NewYamlBuilder(filepath string) (*Builder, error) {
 		users[i] = User{
 			Subject:           yuser.Subject,
 			Email:             yuser.Email,
+			EmailVerified:     yuser.EmailVerified,
 			PreferredUsername: yuser.PreferredUsername,
+			Name:              yuser.Name,
+			GivenName:         yuser.GivenName,
+			FamilyName:        yuser.FamilyName,
 			PasswordHash:      yuser.PasswordHash,
 			Phone:             yuser.Phone,
 			Address:           yuser.Address,
@@ -134,24 +193,28 @@ func NewYamlBuilder(filepath string) (*Builder, error) {
 	}
 
 	builder := &Builder{
-		Name:                  yamlConfig.Name,
-		MasterKey:             yamlConfig.MasterKey,
-		Issuer:                yamlConfig.Issuer,
-		Audience:              yamlConfig.Audience,
-		RequireMFA:            yamlConfig.RequireMFA,
-		ReuseRefreshTokens:    yamlConfig.ReuseRefreshTokens,
-		PrivateRSAKeyFilepath: yamlConfig.PrivateRSAKeyPath,
+		Name:                    yamlConfig.Name,
+		MasterKey:               yamlConfig.MasterKey,
+		Issuer:                  yamlConfig.Issuer,
+		Audience:                yamlConfig.Audience,
+		RequireMFA:              yamlConfig.RequireMFA,
+		ReuseRefreshTokens:      yamlConfig.ReuseRefreshTokens,
+		PrivateRSAKeyFilepath:   yamlConfig.PrivateRSAKeyPath,
+		PreviousRSAKeyFilepaths: yamlConfig.PreviousRSAKeyPaths,
 
 		UseHSTS:             yamlConfig.Middlewares.HSTS,
 		UseCSP:              yamlConfig.Middlewares.CSP,
 		UseSecureCookie:     yamlConfig.Middlewares.SecureCookies,
 		UseForwardedHeaders: yamlConfig.Middlewares.ForwardHeaders,
+		AdminEnabled:        yamlConfig.Admin.Enabled,
+		AdminGroup:          yamlConfig.Admin.Group,
 		LogRequests:         yamlConfig.Middlewares.LogRequests,
 
 		BaseTemplateFilepath:      yamlConfig.Templates.Base,
 		LoginTemplateFilepath:     yamlConfig.Templates.Login,
 		MFACreateTemplateFilepath: yamlConfig.Templates.MFACreate,
 		MFAVerifyTemplateFilepath: yamlConfig.Templates.MFAVerify,
+		LogoutTemplateFilepath:    yamlConfig.Templates.Logout,
 
 		AccessTTL:  time.Duration(yamlConfig.TTL.Access) * time.Minute,
 		RefreshTTL: time.Duration(yamlConfig.TTL.Refresh) * time.Minute,
@@ -163,20 +226,39 @@ func NewYamlBuilder(filepath string) (*Builder, error) {
 		Users:   users,
 	}
 
+	if yamlConfig.LDAPServer.Enabled {
+		builder.LDAPServer = &domain.LDAPServerConfig{
+			Address:          yamlConfig.LDAPServer.Address,
+			BaseDN:           yamlConfig.LDAPServer.BaseDN,
+			BindDN:           yamlConfig.LDAPServer.BindDN,
+			BindPasswordHash: yamlConfig.LDAPServer.BindPasswordHash,
+			AllowAnonymous:   yamlConfig.LDAPServer.AllowAnonymous,
+			UsersCanSearch:   yamlConfig.LDAPServer.UsersCanSearch,
+			TLSMode:          yamlConfig.LDAPServer.TLS.Mode,
+			TLSCertPath:      yamlConfig.LDAPServer.TLS.CertPath,
+			TLSKeyPath:       yamlConfig.LDAPServer.TLS.KeyPath,
+		}
+	}
+
 	builder.UseSQLite(yamlConfig.Sqlite.Filepath, sqliteDatabases)
 	if yamlConfig.Ldap.Server != "" {
 		builder.UseLDAP(
 			yamlConfig.Ldap.Server,
 			LDAPConfig{
-				Bind:             yamlConfig.Ldap.Bind,
-				Password:         yamlConfig.Ldap.Password,
-				FilterDN:         yamlConfig.Ldap.FilterDN,
-				BaseDN:           yamlConfig.Ldap.BaseDN,
-				SubjectAttribute: yamlConfig.Ldap.Attributes.Subject,
-				NameAttribute:    yamlConfig.Ldap.Attributes.Name,
-				EmailAttribute:   yamlConfig.Ldap.Attributes.Email,
-				PhoneAttribute:   yamlConfig.Ldap.Attributes.Phone,
-				AddressAttribute: yamlConfig.Ldap.Attributes.Address,
+				Bind:                 yamlConfig.Ldap.Bind,
+				Password:             yamlConfig.Ldap.Password,
+				FilterDN:             yamlConfig.Ldap.FilterDN,
+				BaseDN:               yamlConfig.Ldap.BaseDN,
+				SubjectAttribute:     yamlConfig.Ldap.Attributes.Subject,
+				NameAttribute:        yamlConfig.Ldap.Attributes.Name,
+				DisplayNameAttribute: yamlConfig.Ldap.Attributes.DisplayName,
+				GivenNameAttribute:   yamlConfig.Ldap.Attributes.GivenName,
+				FamilyNameAttribute:  yamlConfig.Ldap.Attributes.FamilyName,
+				EmailVerified:        yamlConfig.Ldap.EmailVerified,
+				GroupsAttribute:      yamlConfig.Ldap.Attributes.Groups,
+				EmailAttribute:       yamlConfig.Ldap.Attributes.Email,
+				PhoneAttribute:       yamlConfig.Ldap.Attributes.Phone,
+				AddressAttribute:     yamlConfig.Ldap.Attributes.Address,
 			})
 	}
 	return builder, nil

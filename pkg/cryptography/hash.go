@@ -5,11 +5,8 @@ import (
 	"encoding/base64"
 )
 
+// SHA256 returns the base64url encoded SHA-256 hash of a text
 func SHA256(text string) string {
-	return base64.RawURLEncoding.EncodeToString(SHA256b([]byte(text)))
-}
-
-func SHA256b(bytes []byte) []byte {
-	hasher := sha256.New()
-	return hasher.Sum(bytes)
+	sum := sha256.Sum256([]byte(text))
+	return base64.RawURLEncoding.EncodeToString(sum[:])
 }

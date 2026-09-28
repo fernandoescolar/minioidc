@@ -13,6 +13,14 @@ const (
 	UnsupportedGrantType = "unsupported_grant_type"
 	InvalidScope         = "invalid_scope"
 	UnauthorizedClient   = "unauthorized_client"
+	UnsupportedResponse  = "unsupported_response_type"
+	InvalidToken         = "invalid_token"
+	ServerError          = "server_error"
+
+	LoginRequired          = "login_required"
+	InteractionRequired    = "interaction_required"
+	RequestNotSupported    = "request_not_supported"
+	RequestURINotSupported = "request_uri_not_supported"
 
 	internalServerError = "internal_server_error"
 	applicationJSON     = "application/json"
@@ -25,12 +33,15 @@ func JSON(w http.ResponseWriter, data []byte) {
 
 	_, err := w.Write(data)
 	if err != nil {
-		log.Println("Error writing response: %w", err)
+		log.Printf("Error writing response: %v", err)
 	}
 }
 
+// InternalServerError logs the error and writes a generic error, so internal
+// details are never sent to the client.
 func InternalServerError(w http.ResponseWriter, errorMsg string) {
-	Error(w, internalServerError, errorMsg, http.StatusInternalServerError)
+	log.Printf("Error: %s", errorMsg)
+	Error(w, internalServerError, "The server encountered an unexpected error", http.StatusInternalServerError)
 }
 
 func Error(w http.ResponseWriter, e, d string, statusCode int) {
@@ -41,6 +52,7 @@ func Error(w http.ResponseWriter, e, d string, statusCode int) {
 	resp, err := json.Marshal(errJSON)
 	if err != nil {
 		http.Error(w, e, http.StatusInternalServerError)
+		return
 	}
 
 	NoCache(w)
@@ -49,7 +61,7 @@ func Error(w http.ResponseWriter, e, d string, statusCode int) {
 
 	_, err = w.Write(resp)
 	if err != nil {
-		log.Println("Error writing response: %w", err)
+		log.Printf("Error writing response: %v", err)
 	}
 }
 

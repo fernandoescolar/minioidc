@@ -78,6 +78,20 @@ func (us *miniUserStore) GetUserByUsernameAndPassword(username string, password 
 	return nil, errors.New("user not found")
 }
 
+// UpdatePassword changes the password of a User (until the next restart: the
+// users of the configuration file are not persisted)
+func (us *miniUserStore) UpdatePassword(userID, passwordHash string) error {
+	v, ok := us.Load(userID)
+	if !ok {
+		return errors.New("user not found")
+	}
+
+	data := v.(domain.UserData)
+	data.PasswordHash = passwordHash
+	us.Store(userID, data)
+	return nil
+}
+
 // ListUsers returns all the Users sorted by username
 func (us *miniUserStore) ListUsers() ([]domain.UserData, error) {
 	users := []domain.UserData{}

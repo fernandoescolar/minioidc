@@ -84,7 +84,7 @@ func (s *testServer) introspect(t *testing.T, token string, auth func(url.Values
 		setups = append(setups, setup)
 	}
 
-	resp, body := postForm(t, http.DefaultClient, s.url("/introspect"), form, setups...)
+	resp, body := postForm(t, http.DefaultClient, s.url("/connect/introspect"), form, setups...)
 	var result introspection
 	if resp.StatusCode == http.StatusOK {
 		if err := json.Unmarshal([]byte(body), &result); err != nil {
@@ -106,19 +106,19 @@ func TestPrivateKeyJWTClient(t *testing.T) {
 	form := url.Values{"grant_type": {"authorization_code"}, "code": {code}, "redirect_uri": {redirectURI}, "code_verifier": {codeVerifier}}
 
 	// the client cannot authenticate with a method it has not registered
-	resp, body := postForm(t, http.DefaultClient, s.url("/token"), url.Values{
+	resp, body := postForm(t, http.DefaultClient, s.url("/connect/token"), url.Values{
 		"grant_type": {"authorization_code"}, "code": {code}, "redirect_uri": {redirectURI}, "code_verifier": {codeVerifier}, "client_id": {privateKeyClientID},
 	})
 	expectError(t, resp, body, http.StatusUnauthorized, "invalid_client")
 
-	resp, body = postForm(t, http.DefaultClient, s.url("/token"), withAssertion(form, clientAssertion(t, key, "http://issuer.test/token")))
+	resp, body = postForm(t, http.DefaultClient, s.url("/connect/token"), withAssertion(form, clientAssertion(t, key, "http://issuer.test/connect/token")))
 	expectStatus(t, resp, body, http.StatusOK)
 	var tk tokens
 	_ = json.Unmarshal([]byte(body), &tk)
 
 	// the refresh token can be introspected by its client, with an assertion for the introspection endpoint
 	resp, result := s.introspect(t, tk.RefreshToken, func(f url.Values) (url.Values, func(*http.Request)) {
-		return withAssertion(f, clientAssertion(t, key, "http://issuer.test/introspect")), nil
+		return withAssertion(f, clientAssertion(t, key, "http://issuer.test/connect/introspect")), nil
 	})
 	expectStatus(t, resp, "", http.StatusOK)
 	if !result.Active || result.TokenType != "refresh_token" || result.ClientID != privateKeyClientID {
@@ -189,7 +189,7 @@ func TestIntrospection(t *testing.T) {
 
 	// the access token is inactive after the logout
 	logout := url.Values{"id_token_hint": {tk.IDToken}}
-	resp, _ = get(t, c, s.url("/logout?"+logout.Encode()))
+	resp, _ = get(t, c, s.url("/connect/endsession?"+logout.Encode()))
 	expectStatus(t, resp, "", http.StatusOK)
 	_, result = s.introspect(t, tk.AccessToken, asResourceServer)
 	if result.Active {
@@ -203,7 +203,7 @@ func TestClientAuthenticationDiscovery(t *testing.T) {
 	expectStatus(t, resp, body, http.StatusOK)
 
 	for _, expected := range []string{
-		`"introspection_endpoint":"http://issuer.test/introspect"`,
+		`"introspection_endpoint":"http://issuer.test/connect/introspect"`,
 		`"private_key_jwt"`, `"client_secret_jwt"`,
 		`"token_endpoint_auth_signing_alg_values_supported":["RS256"`,
 		`"introspection_endpoint_auth_methods_supported":["client_secret_basic","client_secret_post","client_secret_jwt","private_key_jwt"]`,
@@ -243,7 +243,7 @@ func TestClientAssertionReplayBetweenInstances(t *testing.T) {
 	first := newClientAuthServerWithKey(t, key, useSQLite)
 	second := newClientAuthServerWithKey(t, key, useSQLite)
 
-	assertion := clientAssertion(t, key, "http://issuer.test/introspect")
+	assertion := clientAssertion(t, key, "http://issuer.test/connect/introspect")
 	introspect := func(s *testServer) *http.Response {
 		resp, _ := s.introspect(t, "any-token", func(f url.Values) (url.Values, func(*http.Request)) {
 			return withAssertion(f, assertion), nil

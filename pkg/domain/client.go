@@ -16,6 +16,16 @@ const (
 	AuthMethodPrivateKeyJWT     = "private_key_jwt"
 	AuthMethodNone              = "none"
 
+	// Grant types a client can be allowed to use
+	GrantTypeAuthorizationCode = "authorization_code"
+	GrantTypeRefreshToken      = "refresh_token"
+	GrantTypeClientCredentials = "client_credentials"
+	GrantTypePassword          = "password"
+	GrantTypeDeviceCode        = "urn:ietf:params:oauth:grant-type:device_code"
+	GrantTypeJWTBearer         = "urn:ietf:params:oauth:grant-type:jwt-bearer"
+	// GrantTypeImplicit allows the implicit and hybrid flows (response_type with token or id_token)
+	GrantTypeImplicit = "implicit"
+
 	// MinClientSecretJWTLength is the minimum length of the secret used to sign
 	// client_secret_jwt assertions (RFC 7518 section 3.2: a key of 256 bits for HS256)
 	MinClientSecretJWTLength = 32
@@ -49,8 +59,20 @@ type ClientData struct {
 	// client has a secret hash, and none (public client) otherwise.
 	TokenEndpointAuthMethod string
 	// JWKSURI and PublicKeys are the keys of the private_key_jwt assertions
+	// (and of the jwt-bearer authorization grants)
 	JWKSURI    string
 	PublicKeys []crypto.PublicKey
+	// GrantTypes are the grant types the client can use. If it is empty, the
+	// client can use authorization_code and refresh_token.
+	GrantTypes []string
+}
+
+// DefaultGrantTypes are the grant types of the clients without grant_types
+var DefaultGrantTypes = []string{GrantTypeAuthorizationCode, GrantTypeRefreshToken}
+
+var knownGrantTypes = []string{
+	GrantTypeAuthorizationCode, GrantTypeRefreshToken, GrantTypeClientCredentials, GrantTypePassword,
+	GrantTypeDeviceCode, GrantTypeJWTBearer, GrantTypeImplicit,
 }
 
 type Client interface {
@@ -66,6 +88,9 @@ type Client interface {
 
 	// AuthMethodAllowed returns true if the client can authenticate with the method
 	AuthMethodAllowed(method string) bool
+
+	// GrantTypeAllowed returns true if the client can use the grant type
+	GrantTypeAllowed(grantType string) bool
 
 	// ClientSecretIsValid returns true if the passed secret is valid for
 	ClientSecretIsValid(string) bool
@@ -85,7 +110,9 @@ func ValidateClientData(data ClientData) error {
 
 	switch data.TokenEndpointAuthMethod {
 	case "":
-		if data.Secret != "" || data.JWKSURI != "" || len(data.PublicKeys) > 0 {
+		// the keys can also verify the jwt-bearer grants of a client with a secret
+		usesKeys := (data.JWKSURI != "" || len(data.PublicKeys) > 0) && !contains(data.GrantTypes, GrantTypeJWTBearer)
+		if data.Secret != "" || usesKeys {
 			return fmt.Errorf("client %s: token_endpoint_auth_method is required to use a plain secret or public keys", data.ID)
 		}
 	case AuthMethodClientSecretBasic, AuthMethodClientSecretPost:
@@ -106,6 +133,24 @@ func ValidateClientData(data ClientData) error {
 		}
 	default:
 		return fmt.Errorf("client %s: unsupported token_endpoint_auth_method %s", data.ID, data.TokenEndpointAuthMethod)
+	}
+
+	return validateGrantTypes(data)
+}
+
+func validateGrantTypes(data ClientData) error {
+	public := NewClient(data).IsPublic()
+	for _, gt := range data.GrantTypes {
+		if !contains(knownGrantTypes, gt) {
+			return fmt.Errorf("client %s: unsupported grant type %s", data.ID, gt)
+		}
+
+		switch {
+		case gt == GrantTypeClientCredentials && public:
+			return fmt.Errorf("client %s: public clients cannot use client_credentials", data.ID)
+		case gt == GrantTypeJWTBearer && data.JWKSURI == "" && len(data.PublicKeys) == 0 && data.Secret == "":
+			return fmt.Errorf("client %s: jwt-bearer requires the client keys (jwks_uri or public keys) or a client_secret_jwt secret", data.ID)
+		}
 	}
 
 	return nil
@@ -144,6 +189,14 @@ func (c *client) AuthMethodAllowed(method string) bool {
 	default:
 		return method == AuthMethodClientSecretBasic || method == AuthMethodClientSecretPost
 	}
+}
+
+func (c *client) GrantTypeAllowed(grantType string) bool {
+	if len(c.data.GrantTypes) == 0 {
+		return contains(DefaultGrantTypes, grantType)
+	}
+
+	return contains(c.data.GrantTypes, grantType)
 }
 
 // ClientSecretIsValid returns true if the passed secret is valid for

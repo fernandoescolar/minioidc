@@ -1,26 +1,23 @@
-{{define "content"}}
-<form class="form" method="post">
-    <p class="error">
-        {{ if .InvalidVerificationCode }}
-        ⚠️ Invalid verification code
-        {{ end }}
-        {{ if .TooManyAttempts }}
-        ⛔ Too many failed attempts. Try it again later.
-        {{ end }}
-        {{ if .UnknownError }}
-        ☢️ Error. Try it again later or contact the administrator.
-        {{ end }}
-    </p>
-    <div class="otp-wrapper">
-        <input
-            type="text"
-            autocomplete="one-time-code"
-            inputmode="numeric"
-            maxlength="6"
-            pattern="\d{6}"
-            name="verification_code" />
-        <button id="verify" type="submit">Verify</button>
+{{ define "title" }}Two-step verification · {{ .Name }}{{ end }}
+{{ define "content" }}
+<div class="stack">
+    <div>
+        <h1 class="page-title">Two-step verification</h1>
+        <p class="page-subtitle">Enter the 6-digit code of your authenticator app.</p>
     </div>
-    <input type="hidden" name="__csrf" value="{{ .CSRF }}">
-</form>
-{{end}}
+
+    {{ if .InvalidVerificationCode }}<div class="alert-error" role="alert">Invalid verification code. Try it again.</div>{{ end }}
+    {{ if .TooManyAttempts }}<div class="alert-error" role="alert">Too many failed attempts. Try it again later.</div>{{ end }}
+    {{ if .FormExpired }}<div class="alert-warning" role="alert">The form has expired. Please try again.</div>{{ end }}
+    {{ if .UnknownError }}<div class="alert-error" role="alert">Something went wrong. Try it again later or contact the administrator.</div>{{ end }}
+
+    <form class="stack" method="post">
+        <div>
+            <label class="label" for="verification_code">Verification code</label>
+            <input class="code-input" id="verification_code" name="verification_code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="\d{6}" placeholder="000000" required autofocus>
+        </div>
+        <input type="hidden" name="__csrf" value="{{ .CSRF }}">
+        <button class="btn-primary btn-block" id="verify" type="submit">Verify</button>
+    </form>
+</div>
+{{ end }}

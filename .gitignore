@@ -1,9 +1,15 @@
 .DS_Store
+.idea
+.vscode
 bin
 obj
+vendor
 *.pem
 *.sqlite3
 *.sqlite3-wal
 *.sqlite3-shm
 .vscode
 internal/admin/ui/dist
+
+# the data of the default configuration (SQLite, the master key and the signing key)
+/data/

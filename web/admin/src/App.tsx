@@ -34,15 +34,24 @@ export function App() {
     api.info().then(setInfo, (e: Error) => setError(e.message))
   }, [])
 
+  useEffect(() => {
+    if (info) document.title = `Administration · ${info.name}`
+  }, [info])
+
   return (
     <div className="min-h-screen">
       <header className="border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
-        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 px-4 py-3">
-          <div className="flex items-center gap-6">
-            <span className="text-lg font-semibold tracking-tight">
-              minioidc <span className="font-normal text-slate-500 dark:text-slate-400">admin</span>
-            </span>
-            <nav className="flex gap-1" aria-label="Sections">
+        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-x-6 gap-y-3 px-4 py-3">
+          <div className="flex min-w-0 flex-wrap items-center gap-x-6 gap-y-2">
+            <a href="#/users" className="flex items-center gap-2.5 text-lg font-semibold tracking-tight">
+              <span className="brand-mark" aria-hidden="true">
+                {(info?.name ?? 'm').trim().charAt(0).toUpperCase()}
+              </span>
+              <span>
+                {info?.name ?? 'minioidc'} <span className="font-normal text-slate-500 dark:text-slate-400">admin</span>
+              </span>
+            </a>
+            <nav className="-mx-1 flex gap-1 overflow-x-auto" aria-label="Sections">
               {pages.map((p) => (
                 <a
                   key={p.id}
@@ -60,10 +69,12 @@ export function App() {
             </nav>
           </div>
           {info && (
-            <div className="flex items-center gap-3 text-sm text-slate-600 dark:text-slate-400">
-              <span>{info.me.name || info.me.preferred_username}</span>
-              <a className="btn-secondary" href="../logout">
-                Log out
+            <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400">
+              <a className="btn-ghost" href="../profile" title="Your account">
+                {info.me.name || info.me.preferred_username}
+              </a>
+              <a className="btn-secondary" href="../connect/endsession">
+                Sign out
               </a>
             </div>
           )}
@@ -80,7 +91,7 @@ export function App() {
         ) : page === 'users' ? (
           <UsersPage info={info} />
         ) : page === 'clients' ? (
-          <ClientsPage />
+          <ClientsPage info={info} />
         ) : (
           <MaintenancePage />
         )}

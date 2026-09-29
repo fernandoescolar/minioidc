@@ -88,6 +88,7 @@ func (m *Minioidc) CleanExpired() {
 	m.config.GrantStore.CleanExpired()
 	m.config.UserBlockedStore.CleanExpired(m.Now())
 	m.config.ClientAssertionStore.CleanExpired(m.Now())
+	m.config.DeviceCodeStore.CleanExpired(m.Now())
 	log.Println("CleanExpired: Expired sessions and grants have been removed")
 }
 

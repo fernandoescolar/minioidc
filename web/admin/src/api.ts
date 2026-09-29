@@ -2,9 +2,12 @@
 // authenticates the requests, and the changes send the CSRF header.
 
 export interface Info {
+  name: string
   issuer: string
   admin_group: string
   users_readonly: boolean
+  allow_implicit_flow: boolean
+  allow_password_grant: boolean
   me: { subject: string; preferred_username: string; name: string }
 }
 
@@ -48,6 +51,7 @@ export interface Client {
   post_logout_redirect_uris: string[]
   jwks_uri: string
   public_keys: string[]
+  grant_types: string[]
   has_secret: boolean
   /** only returned when a secret is generated */
   secret?: string
@@ -140,6 +144,20 @@ export const authMethods: { value: AuthMethod; label: string; description: strin
   { value: 'private_key_jwt', label: 'private_key_jwt', description: 'JWT signed with the client private key' },
   { value: 'none', label: 'none (public client)', description: 'SPAs and mobile apps: PKCE is required' },
   { value: '', label: 'client_secret_basic or client_secret_post', description: 'Default of the clients of the configuration' },
+]
+
+export const grantTypes: { value: string; label: string; description: string; discouraged?: 'implicit' | 'password' }[] = [
+  { value: 'authorization_code', label: 'Authorization code', description: 'Web, SPA and mobile apps (with PKCE)' },
+  { value: 'refresh_token', label: 'Refresh token', description: 'Renew the tokens (offline_access scope)' },
+  { value: 'client_credentials', label: 'Client credentials', description: 'Services without user (confidential clients)' },
+  { value: 'urn:ietf:params:oauth:grant-type:device_code', label: 'Device code', description: 'TVs and CLIs (RFC 8628)' },
+  {
+    value: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+    label: 'JWT bearer',
+    description: 'The client gets tokens of any user with an assertion signed with its keys (RFC 7523)',
+  },
+  { value: 'implicit', label: 'Implicit and hybrid', description: 'Discouraged (RFC 9700)', discouraged: 'implicit' },
+  { value: 'password', label: 'Password', description: 'Discouraged (RFC 9700)', discouraged: 'password' },
 ]
 
 export const usesSecret = (method: AuthMethod) =>

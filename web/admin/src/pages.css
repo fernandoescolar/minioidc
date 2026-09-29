@@ -1,0 +1,82 @@
+/*
+ * The stylesheet of the pages of the server (templates/), compiled to
+ * static/styles.css with `npm run build:css` (make build-admin). The templates use the components
+ * of components.css and the layout classes below, so the custom templates can
+ * use them without compiling the stylesheet again.
+ */
+@import "tailwindcss" source(none);
+@import "../../theme/components.css";
+@source "../../../templates";
+/* all the components are compiled, so the custom templates can use them */
+@source inline("{,dark:}{btn,btn-primary,btn-secondary,btn-danger,btn-ghost,btn-block,input,code-input,label,hint,card,badge,alert,alert-error,alert-success,alert-warning,alert-info,link,brand-mark,page,page-brand,page-card,page-title,page-subtitle,page-footer,stack,menu,menu-item,qr,secret,step,step-done}");
+
+@layer base {
+  html {
+    @apply h-full;
+  }
+
+  body {
+    @apply min-h-full bg-slate-50 text-slate-900 antialiased dark:bg-slate-950 dark:text-slate-100;
+  }
+
+  /* the QR code of the authenticator apps is always black on white */
+  #qrcode img,
+  #qrcode canvas {
+    @apply mx-auto h-auto max-w-full;
+  }
+}
+
+/* layout: a centered card with the brand above it */
+@utility page {
+  @apply flex min-h-screen flex-col items-center px-4 py-8 sm:justify-center sm:py-12;
+}
+
+@utility page-brand {
+  @apply mb-6 flex items-center gap-2.5 text-lg font-semibold tracking-tight text-slate-900 dark:text-white;
+}
+
+@utility page-card {
+  @apply card w-full max-w-md p-6 sm:p-8;
+}
+
+@utility page-title {
+  @apply text-xl font-semibold tracking-tight text-slate-900 dark:text-white;
+}
+
+@utility page-subtitle {
+  @apply mt-1 text-sm text-slate-600 dark:text-slate-400;
+}
+
+@utility page-footer {
+  @apply mt-8 text-center text-xs text-slate-500 dark:text-slate-500;
+}
+
+@utility stack {
+  @apply flex flex-col gap-4;
+}
+
+/* a list of rows inside a card (e.g. the options of the profile) */
+@utility menu {
+  @apply -mx-2 flex flex-col divide-y divide-slate-100 dark:divide-slate-800;
+}
+
+@utility menu-item {
+  @apply flex items-center justify-between gap-3 rounded-lg px-2 py-3 text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800/60;
+}
+
+@utility qr {
+  @apply mx-auto w-fit rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-700;
+}
+
+@utility secret {
+  @apply rounded-lg bg-slate-100 px-3 py-2 text-center font-mono text-sm tracking-wider break-all text-slate-800 select-all dark:bg-slate-800 dark:text-slate-100;
+}
+
+/* the number of a step of a list (e.g. the next steps after the setup) */
+@utility step {
+  @apply flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-indigo-50 text-xs font-semibold text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300;
+}
+
+@utility step-done {
+  @apply bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300;
+}

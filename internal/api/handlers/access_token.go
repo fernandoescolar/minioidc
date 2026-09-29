@@ -16,6 +16,7 @@ type accessTokenValidator struct {
 	audience     string
 	keypair      *cryptography.Keypair
 	sessionStore domain.SessionStore
+	clientStore  domain.ClientStore
 }
 
 func newAccessTokenValidator(config *domain.Config, now func() time.Time) *accessTokenValidator {
@@ -25,11 +26,14 @@ func newAccessTokenValidator(config *domain.Config, now func() time.Time) *acces
 		audience:     config.Audience,
 		keypair:      config.Keypair,
 		sessionStore: config.SessionStore,
+		clientStore:  config.ClientStore,
 	}
 }
 
 // validate checks the signature, type, issuer, audience and expiration of the
-// token. The token is only valid while its session exists (logout revokes it).
+// token. A user token is only valid while its session exists (logout revokes
+// it). A client token (client_credentials) has no session: the returned
+// session is nil, and it is valid while the client exists.
 func (v *accessTokenValidator) validate(accessToken string) (*domain.AccessTokenClaims, domain.Session, error) {
 	claims := &domain.AccessTokenClaims{}
 	token, err := v.keypair.VerifyJWT(accessToken, claims,
@@ -44,6 +48,18 @@ func (v *accessTokenValidator) validate(accessToken string) (*domain.AccessToken
 
 	if token.Header["typ"] != domain.AccessTokenType {
 		return nil, nil, errors.New("it is not an access token")
+	}
+
+	if claims.SessionID == "" {
+		if claims.Subject == "" || claims.Subject != claims.ClientID {
+			return nil, nil, errors.New("invalid client token")
+		}
+
+		if _, err := v.clientStore.GetClientByID(claims.ClientID); err != nil {
+			return nil, nil, errors.New("the client does not exist")
+		}
+
+		return claims, nil, nil
 	}
 
 	session, err := v.sessionStore.GetSessionByID(claims.SessionID)

@@ -33,6 +33,7 @@ type logoutModel struct {
 	ClientID              string
 	PostLogoutRedirectURI string
 	State                 string
+	FormExpired           bool
 }
 
 var _ http.Handler = (*LogoutHandler)(nil)
@@ -91,7 +92,8 @@ func (h *LogoutHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else if !utils.GetCSRFValid(r) {
-		http.Error(w, "Bad Request", http.StatusBadRequest)
+		model.FormExpired = true
+		utils.RenderTemplateStatus(w, http.StatusBadRequest, h.template, model)
 		return
 	}
 

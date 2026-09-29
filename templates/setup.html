@@ -1,0 +1,105 @@
+{{ define "title" }}{{ if .Ready }}Ready{{ else }}Setup{{ end }} · {{ .Name }}{{ end }}
+{{ define "content" }}
+{{ if .Ready }}
+<div class="stack">
+    <div>
+        <p class="badge bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">Setup completed</p>
+        <h1 class="page-title mt-3">{{ .Name }} is ready</h1>
+        <p class="page-subtitle">You are signed in as <strong>{{ .Username }}</strong>, the administrator. These are the next steps:</p>
+    </div>
+
+    <ol class="stack">
+        <li class="flex gap-3">
+            <span class="step">1</span>
+            <div class="min-w-0 flex-1 text-sm">
+                <p class="font-medium">Register your first application</p>
+                {{ if .AdminURL }}
+                <p class="hint">Create a client with its redirect URIs in the <a class="link" href="{{ .AdminURL }}#/clients">administration</a>.</p>
+                {{ else }}
+                <p class="hint">Add it to the <code>clients</code> of the configuration file, or enable the administration (<code>admin.enabled</code>) to manage them here.</p>
+                {{ end }}
+            </div>
+        </li>
+        <li class="flex gap-3">
+            <span class="step{{ if .HasMFA }} step-done{{ end }}">{{ if .HasMFA }}✓{{ else }}2{{ end }}</span>
+            <div class="min-w-0 flex-1 text-sm">
+                <p class="font-medium">Protect your account</p>
+                {{ if .HasMFA }}
+                <p class="hint">The two-step verification is on.</p>
+                {{ else }}
+                <p class="hint">Add an <a class="link" href="{{ basePath }}/profile/mfa">authenticator app</a>: your account can manage the whole server.</p>
+                {{ end }}
+            </div>
+        </li>
+        <li class="flex gap-3">
+            <span class="step">3</span>
+            <div class="min-w-0 flex-1 text-sm">
+                <p class="font-medium">Connect your applications</p>
+                <p class="hint">Use the issuer, or the discovery document, in their OpenID Connect settings.</p>
+                <p class="label mt-3">Issuer</p>
+                <p class="secret text-left">{{ .Issuer }}</p>
+                <p class="label mt-3">Discovery document</p>
+                <p class="secret text-left">{{ .DiscoveryURL }}</p>
+            </div>
+        </li>
+    </ol>
+
+    <div class="flex flex-col gap-2 sm:flex-row-reverse">
+        {{ if .AdminURL }}<a class="btn-primary sm:flex-1" href="{{ .AdminURL }}">Open the administration</a>{{ end }}
+        <a class="{{ if .AdminURL }}btn-secondary{{ else }}btn-primary{{ end }} sm:flex-1" href="{{ basePath }}/profile">Go to your account</a>
+    </div>
+</div>
+{{ else }}
+<div class="stack">
+    <div>
+        <h1 class="page-title">Welcome to {{ .Name }}</h1>
+        <p class="page-subtitle">There are no users yet. Create the administrator account to finish the setup.</p>
+    </div>
+
+    {{ if .InvalidCode }}<div class="alert-error" role="alert">The setup code is not valid. Copy it from the server log.</div>{{ end }}
+    {{ if .MissingUsername }}<div class="alert-error" role="alert">The username is required.</div>{{ end }}
+    {{ if .WeakPassword }}<div class="alert-error" role="alert">The password must have at least 8 characters.</div>{{ end }}
+    {{ if .PasswordMismatch }}<div class="alert-error" role="alert">The passwords do not match.</div>{{ end }}
+    {{ if .FormExpired }}<div class="alert-warning" role="alert">The form has expired. Please try again.</div>{{ end }}
+    {{ if .UnknownError }}<div class="alert-error" role="alert">The administrator could not be created. Check the server log.</div>{{ end }}
+
+    <form class="stack" method="post">
+        {{ if .CodeFromLink }}
+        <input type="hidden" name="code" value="{{ .Code }}">
+        <input type="hidden" name="code_from_link" value="1">
+        {{ else }}
+        <div>
+            <label class="label" for="code">Setup code</label>
+            <input class="input font-mono tracking-wider" id="code" name="code" type="text" value="{{ .Code }}" autocomplete="off" autocapitalize="characters" spellcheck="false" required autofocus aria-describedby="code_hint">
+            <p class="hint" id="code_hint">It is printed in the server log when it starts (<code>docker logs</code>, the terminal…), next to the link of this page.</p>
+        </div>
+        {{ end }}
+        <div>
+            <label class="label" for="username">Username</label>
+            <input class="input" id="username" name="username" type="text" value="{{ .Username }}" autocomplete="username" autocapitalize="none" spellcheck="false" required {{ if .CodeFromLink }}autofocus{{ end }}>
+        </div>
+        <div class="grid gap-4 sm:grid-cols-2">
+            <div>
+                <label class="label" for="name">Name <span class="font-normal text-slate-500 dark:text-slate-400">(optional)</span></label>
+                <input class="input" id="name" name="name" type="text" value="{{ .DisplayName }}" autocomplete="name">
+            </div>
+            <div>
+                <label class="label" for="email">Email <span class="font-normal text-slate-500 dark:text-slate-400">(optional)</span></label>
+                <input class="input" id="email" name="email" type="email" value="{{ .Email }}" autocomplete="email">
+            </div>
+        </div>
+        <div>
+            <label class="label" for="password">Password</label>
+            <input class="input" id="password" name="password" type="password" autocomplete="new-password" minlength="8" required aria-describedby="password_hint">
+            <p class="hint" id="password_hint">At least 8 characters.</p>
+        </div>
+        <div>
+            <label class="label" for="confirm_password">Confirm password</label>
+            <input class="input" id="confirm_password" name="confirm_password" type="password" autocomplete="new-password" minlength="8" required>
+        </div>
+        <input type="hidden" name="__csrf" value="{{ .CSRF }}">
+        <button class="btn-primary btn-block" type="submit">Create the administrator</button>
+    </form>
+</div>
+{{ end }}
+{{ end }}

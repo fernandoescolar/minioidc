@@ -30,7 +30,7 @@ func (ms *sqlMFACodeStore) NewMFACode(id string, user domain.User, secret, metho
 		method: method,
 	}
 
-	_, err := ms.db.Exec("INSERT INTO mfa VALUES(?,?,?,?);", mfaCode.id, mfaCode.userID, mfaCode.secret, mfaCode.method)
+	_, err := ms.db.Exec("INSERT INTO mfa(id, userID, secret, method) VALUES(?,?,?,?);", mfaCode.id, mfaCode.userID, mfaCode.secret, mfaCode.method)
 	if err != nil {
 		return nil, err
 	}
@@ -90,6 +90,16 @@ func (ms *sqlMFACodeStore) DeleteUserMFACodes(userID string) {
 	if _, err := ms.db.Exec("DELETE FROM mfa WHERE userID = ?;", userID); err != nil {
 		log.Printf("WRN DeleteUserMFACodes: %v", err)
 	}
+}
+
+// DeleteMFACode deletes an MFACode of the user
+func (ms *sqlMFACodeStore) DeleteMFACode(userID, id string) error {
+	r, err := ms.db.Exec("DELETE FROM mfa WHERE id = ? AND userID = ?;", id, userID)
+	if err != nil {
+		return err
+	}
+
+	return expectOneRow(r, "mfa code")
 }
 
 // MFACode converts a miniMFACode to a MFACode

@@ -1,0 +1,35 @@
+# Development environment to test minioidc with LDAP users (ldap section of the
+# configuration): an OpenLDAP server and phpLDAPadmin to manage its users.
+# The credentials are for local development only and the ports are only
+# published on localhost.
+networks:
+  ldap_network:
+    driver: bridge
+services:
+  openldap:
+    image: osixia/openldap:1.5.0
+    container_name: openldap
+    environment:
+      LDAP_BASE_DN: "dc=example,dc=org"
+      LDAP_ORGANISATION: "Example Organization"
+      LDAP_DOMAIN: "example.org"
+      LDAP_ADMIN_PASSWORD: "admin"  # development only
+      LDAP_TLS: "false"             # development only: minioidc connects without TLS
+    networks:
+      - ldap_network
+    ports:
+      - "127.0.0.1:389:389"
+    restart: unless-stopped
+  phpldapadmin:
+    image: osixia/phpldapadmin:0.9.0
+    container_name: phpldapadmin
+    environment:
+      PHPLDAPADMIN_LDAP_HOSTS: openldap
+      PHPLDAPADMIN_HTTPS: "false"
+    networks:
+      - ldap_network
+    ports:
+      - "127.0.0.1:8081:80"
+    restart: unless-stopped
+    depends_on:
+      - openldap

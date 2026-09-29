@@ -49,6 +49,9 @@ func (m *CSRF) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.Handl
 	case http.MethodPost, http.MethodPut:
 		if isFormRequest(r) {
 			r = m.formHTTP(r)
+			// a fresh token for the page of the response (e.g. the form again
+			// with an error, or after the token has expired)
+			r = m.getHTTP(w, r)
 		}
 	}
 
@@ -105,7 +108,6 @@ func (m *CSRF) formHTTP(r *http.Request) *http.Request {
 		return r
 	}
 
-	r = utils.SetCSRFToken(r, csrfToken)
 	if !m.validateCSRFToken(csrfCookie.Value, csrfToken) {
 		return r
 	}

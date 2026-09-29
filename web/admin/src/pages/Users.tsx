@@ -86,9 +86,9 @@ export function UsersPage({ info }: { info: Info }) {
             <thead className="border-b border-slate-200 text-xs text-slate-500 uppercase dark:border-slate-800 dark:text-slate-400">
               <tr>
                 <th className="px-4 py-2 font-medium">User</th>
-                <th className="px-4 py-2 font-medium">Email</th>
-                <th className="px-4 py-2 font-medium">Groups</th>
-                <th className="px-4 py-2 font-medium">Status</th>
+                <th className="hidden px-4 py-2 font-medium md:table-cell">Email</th>
+                <th className="hidden px-4 py-2 font-medium lg:table-cell">Groups</th>
+                <th className="hidden px-4 py-2 font-medium sm:table-cell">Status</th>
                 <th className="px-4 py-2" />
               </tr>
             </thead>
@@ -98,8 +98,9 @@ export function UsersPage({ info }: { info: Info }) {
                   <td className="px-4 py-2.5">
                     <div className="font-medium">{user.preferred_username}</div>
                     {user.name && <div className="text-xs text-slate-500 dark:text-slate-400">{user.name}</div>}
+                    {user.email && <div className="text-xs text-slate-500 md:hidden dark:text-slate-400">{user.email}</div>}
                   </td>
-                  <td className="px-4 py-2.5">
+                  <td className="hidden px-4 py-2.5 md:table-cell">
                     {user.email}
                     {user.email && !user.email_verified && (
                       <span className="ml-1.5">
@@ -107,7 +108,7 @@ export function UsersPage({ info }: { info: Info }) {
                       </span>
                     )}
                   </td>
-                  <td className="px-4 py-2.5">
+                  <td className="hidden px-4 py-2.5 lg:table-cell">
                     <div className="flex flex-wrap gap-1">
                       {user.groups.map((g) => (
                         <Badge key={g} color={g === info.admin_group ? 'indigo' : 'gray'}>
@@ -116,7 +117,7 @@ export function UsersPage({ info }: { info: Info }) {
                       ))}
                     </div>
                   </td>
-                  <td className="px-4 py-2.5">
+                  <td className="hidden px-4 py-2.5 sm:table-cell">
                     <div className="flex flex-wrap gap-1">
                       {user.has_mfa && <Badge color="green">MFA</Badge>}
                       {user.blocked && <Badge color="red">blocked</Badge>}

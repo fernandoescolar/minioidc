@@ -107,6 +107,19 @@ func (us *sqlUserStore) UpdateUser(data domain.UserData) error {
 	return expectOneRow(r, "user")
 }
 
+func (us *sqlUserStore) UpdatePassword(userID, passwordHash string) error {
+	if passwordHash == "" {
+		return errors.New("the password hash is required")
+	}
+
+	r, err := us.db.Exec("UPDATE users SET passwordHash = ? WHERE subject = ?;", passwordHash, userID)
+	if err != nil {
+		return fmt.Errorf("UpdatePassword: %w", err)
+	}
+
+	return expectOneRow(r, "user")
+}
+
 func (us *sqlUserStore) DeleteUser(id string) error {
 	r, err := us.db.Exec("DELETE FROM users WHERE subject = ?;", id)
 	if err != nil {

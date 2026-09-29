@@ -7,11 +7,14 @@ import (
 	"github.com/fernandoescolar/minioidc/internal/api/utils"
 	"github.com/fernandoescolar/minioidc/internal/clientauth"
 	"github.com/fernandoescolar/minioidc/pkg/domain"
+	"github.com/golang-jwt/jwt/v5"
 )
 
 // ClientAuthenticator authenticates the client of a request with a parsed form
+// and verifies the JWT bearer authorization grants of the clients
 type ClientAuthenticator interface {
 	Authenticate(r *http.Request, endpointURL string) (domain.Client, error)
+	VerifyGrantAssertion(client domain.Client, assertion, endpointURL string) (*jwt.RegisteredClaims, error)
 }
 
 // authenticateClient authenticates the client and writes the error response if it fails

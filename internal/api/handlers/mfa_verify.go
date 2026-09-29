@@ -28,6 +28,7 @@ type mfaVerifyModel struct {
 	InvalidVerificationCode bool
 	TooManyAttempts         bool
 	UnknownError            bool
+	FormExpired             bool
 	CSRF                    string
 }
 
@@ -81,7 +82,7 @@ func (h *MFAVerifyHandler) getHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (h *MFAVerifyHandler) postHTTP(w http.ResponseWriter, r *http.Request) {
 	if !utils.GetCSRFValid(r) {
-		http.Error(w, "Bad Request", http.StatusBadRequest)
+		h.render(w, r, mfaVerifyModel{FormExpired: true})
 		return
 	}
 

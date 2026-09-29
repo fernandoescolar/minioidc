@@ -32,6 +32,9 @@ type AuthorizeHandler struct {
 	issuer        string
 	masterKey     string
 	codeTTL       time.Duration
+	accessTTL     time.Duration
+	audience      string
+	allowImplicit bool
 	sessionTTL    time.Duration
 	keypair       *cryptography.Keypair
 	clientStore   domain.ClientStore
@@ -46,10 +49,14 @@ type authorizeRequest struct {
 	params      url.Values
 	client      domain.Client
 	redirectURL *url.URL
-	prompt      map[string]bool
-	maxAge      int64
-	hasMaxAge   bool
-	hint        *domain.IDTokenClaims
+	// responseTypes are the words of response_type (code, token, id_token)
+	responseTypes map[string]bool
+	// fragment is true when the response goes in the fragment of the redirect_uri
+	fragment  bool
+	prompt    map[string]bool
+	maxAge    int64
+	hasMaxAge bool
+	hint      *domain.IDTokenClaims
 }
 
 var _ http.Handler = (*AuthorizeHandler)(nil)
@@ -60,6 +67,9 @@ func NewAuthorizeHandler(config *domain.Config, now func() time.Time, loginEndpo
 		issuer:        config.Issuer,
 		masterKey:     config.MasterKey,
 		codeTTL:       config.CodeTTL,
+		accessTTL:     config.AccessTTL,
+		audience:      config.Audience,
+		allowImplicit: config.AllowImplicitFlow,
 		sessionTTL:    config.SessionTTL,
 		keypair:       config.Keypair,
 		clientStore:   config.ClientStore,
@@ -119,14 +129,68 @@ func (h *AuthorizeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Failed to update session TTL: %v", err)
 	}
 
-	code, err := h.createCode(req, session)
+	params, err := h.createResponse(req, session)
 	if err != nil {
 		log.Printf("Error: authorize: %v", err)
 		h.redirectError(w, r, req, utils.ServerError, "")
 		return
 	}
 
-	h.redirect(w, r, req, url.Values{"code": {code}})
+	h.redirect(w, r, req, params)
+}
+
+// createResponse creates the code and, in the implicit and hybrid flows, the
+// access token and the ID token (never a refresh token: they are sent
+// through the browser)
+func (h *AuthorizeHandler) createResponse(req *authorizeRequest, session domain.Session) (url.Values, error) {
+	params := url.Values{}
+	code := ""
+	if req.responseTypes["code"] {
+		var err error
+		if code, err = h.createCode(req, session); err != nil {
+			return nil, err
+		}
+		params.Set("code", code)
+	}
+
+	if !req.responseTypes["token"] && !req.responseTypes["id_token"] {
+		return params, nil
+	}
+
+	id, err := cryptography.RandomToken()
+	if err != nil {
+		return nil, err
+	}
+
+	now := h.now()
+	grant := domain.NewGrant(domain.GrantData{
+		ID:        cryptography.SHA256(id),
+		FamilyID:  cryptography.SHA256(id),
+		GrantType: domain.GrantTypeCode,
+		ExpiresAt: now.Add(h.accessTTL),
+		Scopes:    strings.Fields(req.params.Get("scope")),
+		Nonce:     req.params.Get("nonce"),
+	}, req.client, session)
+
+	accessToken := ""
+	if req.responseTypes["token"] {
+		if accessToken, err = grant.AccessToken(h.issuer, h.audience, h.accessTTL, h.keypair, now); err != nil {
+			return nil, err
+		}
+		params.Set("access_token", accessToken)
+		params.Set("token_type", "Bearer")
+		params.Set("expires_in", strconv.FormatInt(int64(h.accessTTL.Seconds()), 10))
+	}
+
+	if req.responseTypes["id_token"] {
+		idToken, err := grant.IDToken(h.issuer, h.accessTTL, h.keypair, now, accessToken, code)
+		if err != nil {
+			return nil, err
+		}
+		params.Set("id_token", idToken)
+	}
+
+	return params, nil
 }
 
 // validateClient validates the client and the redirect_uri. Until they are
@@ -150,7 +214,18 @@ func (h *AuthorizeHandler) validateClient(w http.ResponseWriter, params url.Valu
 		return nil, false
 	}
 
-	return &authorizeRequest{params: params, client: client, redirectURL: redirectURL}, true
+	// the errors of the implicit and hybrid flows go in the fragment too (OIDC Core 3.2.2.6)
+	words := " " + params.Get("response_type") + " "
+	mode := params.Get("response_mode")
+	fragment := mode == "fragment" || (mode == "" && (strings.Contains(words, " token ") || strings.Contains(words, " id_token ")))
+
+	return &authorizeRequest{
+		params:        params,
+		client:        client,
+		redirectURL:   redirectURL,
+		responseTypes: map[string]bool{},
+		fragment:      fragment,
+	}, true
 }
 
 // validateRequest returns the OAuth error code and description of an invalid request
@@ -170,20 +245,19 @@ func (h *AuthorizeHandler) validateRequest(req *authorizeRequest) (string, strin
 		}
 	}
 
-	if params.Get("response_type") != "code" {
-		return utils.UnsupportedResponse, "Only the code response type is supported"
-	}
-
-	if mode := params.Get("response_mode"); mode != "" && mode != "query" {
-		return utils.InvalidRequest, "Only the query response mode is supported"
+	if errCode, description := h.validateResponseType(req); errCode != "" {
+		return errCode, description
 	}
 
 	if errCode, description := validateScope(params.Get("scope")); errCode != "" {
 		return errCode, description
 	}
 
-	if errCode, description := validateCodeChallenge(req.client, params.Get("code_challenge"), params.Get("code_challenge_method")); errCode != "" {
-		return errCode, description
+	// PKCE protects the code: the implicit flow has no code
+	if req.responseTypes["code"] {
+		if errCode, description := validateCodeChallenge(req.client, params.Get("code_challenge"), params.Get("code_challenge_method")); errCode != "" {
+			return errCode, description
+		}
 	}
 
 	req.prompt = map[string]bool{}
@@ -317,20 +391,83 @@ func (h *AuthorizeHandler) redirectError(w http.ResponseWriter, r *http.Request,
 	h.redirect(w, r, req, params)
 }
 
+// validateResponseType checks the response_type and the response_mode. The
+// implicit and hybrid flows (token or id_token) are discouraged (RFC 9700):
+// they must be enabled in the configuration and allowed to the client.
+func (h *AuthorizeHandler) validateResponseType(req *authorizeRequest) (string, string) {
+	words := strings.Fields(req.params.Get("response_type"))
+	for _, word := range words {
+		if !contains(word, []string{"code", "token", "id_token"}) || req.responseTypes[word] {
+			return utils.UnsupportedResponse, "Unsupported response_type"
+		}
+		req.responseTypes[word] = true
+	}
+
+	if len(words) == 0 {
+		return utils.InvalidRequest, "The request is missing the required parameter: response_type"
+	}
+
+	implicit := req.responseTypes["token"] || req.responseTypes["id_token"]
+	switch {
+	case implicit && !h.allowImplicit:
+		return utils.UnsupportedResponse, "The implicit and hybrid flows are disabled"
+	case implicit && !req.client.GrantTypeAllowed(domain.GrantTypeImplicit):
+		return utils.UnauthorizedClient, "The client is not allowed to use the implicit and hybrid flows"
+	case req.responseTypes["code"] && !req.client.GrantTypeAllowed(domain.GrantTypeAuthorizationCode):
+		return utils.UnauthorizedClient, "The client is not allowed to use the authorization code flow"
+	}
+
+	switch req.params.Get("response_mode") {
+	case "":
+	case "fragment":
+		req.fragment = true
+	case "query":
+		// OIDC Core 3.2.2.5: the tokens must not be sent in the query
+		if implicit {
+			return utils.InvalidRequest, "The query response mode cannot be used with tokens"
+		}
+	default:
+		return utils.InvalidRequest, "Unsupported response_mode"
+	}
+
+	// OIDC Core 3.2.2.1: the nonce is required when the ID token is returned in the front channel
+	if req.responseTypes["id_token"] && req.params.Get("nonce") == "" {
+		return utils.InvalidRequest, "The nonce is required with the id_token response type"
+	}
+
+	if req.responseTypes["id_token"] && !contains(openidScope, strings.Fields(req.params.Get("scope"))) {
+		return utils.InvalidScope, "The id_token response type requires the openid scope"
+	}
+
+	return "", ""
+}
+
 // redirect sends the response to the client, adding the state and the issuer
-// (RFC 9207) and keeping the query parameters of the redirect_uri
+// (RFC 9207). It goes in the query, keeping the parameters of the
+// redirect_uri, or in the fragment (implicit and hybrid flows).
 func (h *AuthorizeHandler) redirect(w http.ResponseWriter, r *http.Request, req *authorizeRequest, params url.Values) {
-	u := *req.redirectURL
-	query := u.Query()
+	values := url.Values{}
 	for key := range params {
-		query.Set(key, params.Get(key))
+		values.Set(key, params.Get(key))
 	}
 
 	if state := req.params.Get("state"); state != "" {
-		query.Set("state", state)
+		values.Set("state", state)
+	}
+	values.Set("iss", h.issuer)
+
+	u := *req.redirectURL
+	if req.fragment {
+		u.Fragment = ""
+		u.RawFragment = ""
+		http.Redirect(w, r, u.String()+"#"+values.Encode(), http.StatusFound)
+		return
 	}
 
-	query.Set("iss", h.issuer)
+	query := u.Query()
+	for key := range values {
+		query.Set(key, values.Get(key))
+	}
 	u.RawQuery = query.Encode()
 
 	http.Redirect(w, r, u.String(), http.StatusFound)

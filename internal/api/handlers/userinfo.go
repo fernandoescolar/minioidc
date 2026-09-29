@@ -37,7 +37,8 @@ func (h *UserinfoHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	claims, session, err := h.validator.validate(accessToken)
-	if err != nil {
+	// the client tokens (client_credentials) have no user
+	if err != nil || session == nil {
 		invalidToken(w, "Invalid token")
 		return
 	}

@@ -57,7 +57,8 @@ type Grant interface {
 	// RedirectURI is the redirect_uri of the authorization request (code grants)
 	RedirectURI() string
 	AccessToken(issuer string, audience string, ttl time.Duration, kp *cryptography.Keypair, now time.Time) (string, error)
-	IDToken(issuer string, ttl time.Duration, kp *cryptography.Keypair, now time.Time, accessToken string) (string, error)
+	// IDToken signs an ID token. The access token and the code are optional (at_hash and c_hash).
+	IDToken(issuer string, ttl time.Duration, kp *cryptography.Keypair, now time.Time, accessToken, code string) (string, error)
 }
 
 type grant struct {
@@ -92,6 +93,7 @@ type IDTokenClaims struct {
 	AuthTime        int64    `json:"auth_time,omitempty"`
 	AuthorizedParty string   `json:"azp,omitempty"`
 	AccessTokenHash string   `json:"at_hash,omitempty"`
+	CodeHash        string   `json:"c_hash,omitempty"`
 	AuthMethods     []string `json:"amr,omitempty"`
 	SessionID       string   `json:"sid,omitempty"`
 }
@@ -201,14 +203,15 @@ func (g *grant) AccessToken(issuer string, audience string, ttl time.Duration, k
 	return kp.SignJWT(claims, map[string]interface{}{"typ": AccessTokenType})
 }
 
-func (g *grant) IDToken(issuer string, ttl time.Duration, kp *cryptography.Keypair, now time.Time, accessToken string) (string, error) {
+func (g *grant) IDToken(issuer string, ttl time.Duration, kp *cryptography.Keypair, now time.Time, accessToken, code string) (string, error) {
 	clientID := g.client.ClientID()
 	base := &IDTokenClaims{
 		RegisteredClaims: g.registeredClaims(issuer, clientID, ttl, now),
 		Nonce:            g.nonce,
 		AuthTime:         g.session.AuthTime().Unix(),
 		AuthorizedParty:  clientID,
-		AccessTokenHash:  accessTokenHash(accessToken),
+		AccessTokenHash:  halfHash(accessToken),
+		CodeHash:         halfHash(code),
 		AuthMethods:      g.session.AuthMethods(),
 		SessionID:        g.session.ID(),
 	}
@@ -232,12 +235,31 @@ func (g *grant) registeredClaims(issuer string, audience string, ttl time.Durati
 	}
 }
 
-// accessTokenHash computes the at_hash claim for RS256 (OIDC Core 3.1.3.6)
-func accessTokenHash(accessToken string) string {
-	if accessToken == "" {
+// ClientAccessToken signs an access token of a client without user (client_credentials)
+func ClientAccessToken(issuer, audience, clientID string, scopes []string, ttl time.Duration, kp *cryptography.Keypair, now time.Time) (string, error) {
+	claims := &AccessTokenClaims{
+		RegisteredClaims: jwt.RegisteredClaims{
+			Audience:  jwt.ClaimStrings{audience},
+			ExpiresAt: jwt.NewNumericDate(now.Add(ttl)),
+			ID:        uuid.NewString(),
+			IssuedAt:  jwt.NewNumericDate(now),
+			Issuer:    issuer,
+			NotBefore: jwt.NewNumericDate(now),
+			Subject:   clientID,
+		},
+		ClientID: clientID,
+		Scope:    strings.Join(scopes, " "),
+	}
+
+	return kp.SignJWT(claims, map[string]interface{}{"typ": AccessTokenType})
+}
+
+// halfHash computes the at_hash and c_hash claims for RS256 (OIDC Core 3.1.3.6 and 3.3.2.11)
+func halfHash(value string) string {
+	if value == "" {
 		return ""
 	}
 
-	sum := sha256.Sum256([]byte(accessToken))
+	sum := sha256.Sum256([]byte(value))
 	return base64.RawURLEncoding.EncodeToString(sum[:len(sum)/2])
 }

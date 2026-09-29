@@ -120,11 +120,16 @@ func (h *IntrospectionHandler) introspectAccessToken(token string) *introspectio
 		return nil
 	}
 
+	username := ""
+	if session != nil {
+		username = session.User().Username()
+	}
+
 	return &introspectionResponse{
 		Active:    true,
 		Scope:     claims.Scope,
 		ClientID:  claims.ClientID,
-		Username:  session.User().Username(),
+		Username:  username,
 		TokenType: "Bearer",
 		ExpiresAt: claims.ExpiresAt.Unix(),
 		IssuedAt:  unixOrZero(claims.IssuedAt),

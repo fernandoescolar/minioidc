@@ -20,6 +20,11 @@ type UserLister interface {
 	ListUsers() ([]UserData, error)
 }
 
+// PasswordUpdater is implemented by the user stores where the users can change their passwords
+type PasswordUpdater interface {
+	UpdatePassword(userID, passwordHash string) error
+}
+
 // UserAdminStore is implemented by the user stores that can be managed from the admin web
 type UserAdminStore interface {
 	UserStore

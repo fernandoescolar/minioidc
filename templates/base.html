@@ -2,12 +2,23 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=0">
-    <link rel="shortcut icon" href="data:image/x-icon;," type="image/x-icon">
-    <title>{{.Name}}</title>
-    <link rel="stylesheet" type="text/css" href="{{ basePath }}/static/styles.css">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
+    <meta name="referrer" content="no-referrer">
+    <link rel="icon" href="data:,">
+    <title>{{ block "title" . }}{{ .Name }}{{ end }}</title>
+    <link rel="stylesheet" href="{{ basePath }}/static/styles.css">
 </head>
 <body>
-    {{template "content" .}}
+    <div class="page">
+        <a class="page-brand" href="{{ basePath }}/">
+            <span class="brand-mark" aria-hidden="true">{{ initial .Name }}</span>
+            {{ .Name }}
+        </a>
+        <main class="page-card">
+            {{ template "content" . }}
+        </main>
+        <p class="page-footer">Secured by minioidc</p>
+    </div>
 </body>
 </html>

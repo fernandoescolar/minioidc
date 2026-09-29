@@ -21,6 +21,12 @@ type YamlConfig struct {
 	// previous signing keys, still published in the JWKS during a key rotation
 	PreviousRSAKeyPaths []string `yaml:"previous_rsa_key_paths"`
 
+	// the discouraged flows (RFC 9700), disabled by default
+	Grants struct {
+		Implicit bool `yaml:"implicit"`
+		Password bool `yaml:"password"`
+	} `yaml:"grants"`
+
 	Middlewares struct {
 		HSTS           bool `yaml:"hsts"`
 		CSP            bool `yaml:"csp"`
@@ -38,11 +44,17 @@ type YamlConfig struct {
 	} `yaml:"ttl"`
 
 	Templates struct {
-		Base      string `yaml:"base"`
-		Login     string `yaml:"login"`
-		MFACreate string `yaml:"mfa_create"`
-		MFAVerify string `yaml:"mfa_verify"`
-		Logout    string `yaml:"logout"`
+		Base            string `yaml:"base"`
+		Login           string `yaml:"login"`
+		MFACreate       string `yaml:"mfa_create"`
+		MFAVerify       string `yaml:"mfa_verify"`
+		Logout          string `yaml:"logout"`
+		Device          string `yaml:"device"`
+		Error           string `yaml:"error"`
+		Profile         string `yaml:"profile"`
+		ProfilePassword string `yaml:"profile_password"`
+		ProfileMFA      string `yaml:"profile_mfa"`
+		Setup           string `yaml:"setup"`
 	} `yaml:"templates"`
 
 	Sqlite struct {
@@ -102,6 +114,7 @@ type YamlConfig struct {
 		Secret                  string   `yaml:"secret"`
 		JWKSURI                 string   `yaml:"jwks_uri"`
 		PublicKeyPaths          []string `yaml:"public_key_paths"`
+		GrantTypes              []string `yaml:"grant_types"`
 	} `yaml:"clients"`
 
 	Users []struct {
@@ -172,6 +185,7 @@ func NewYamlBuilder(filepath string) (*Builder, error) {
 			Secret:                  c.Secret,
 			JWKSURI:                 c.JWKSURI,
 			PublicKeyPaths:          c.PublicKeyPaths,
+			GrantTypes:              c.GrantTypes,
 		}
 	}
 
@@ -210,11 +224,19 @@ func NewYamlBuilder(filepath string) (*Builder, error) {
 		AdminGroup:          yamlConfig.Admin.Group,
 		LogRequests:         yamlConfig.Middlewares.LogRequests,
 
-		BaseTemplateFilepath:      yamlConfig.Templates.Base,
-		LoginTemplateFilepath:     yamlConfig.Templates.Login,
-		MFACreateTemplateFilepath: yamlConfig.Templates.MFACreate,
-		MFAVerifyTemplateFilepath: yamlConfig.Templates.MFAVerify,
-		LogoutTemplateFilepath:    yamlConfig.Templates.Logout,
+		BaseTemplateFilepath:            yamlConfig.Templates.Base,
+		LoginTemplateFilepath:           yamlConfig.Templates.Login,
+		MFACreateTemplateFilepath:       yamlConfig.Templates.MFACreate,
+		MFAVerifyTemplateFilepath:       yamlConfig.Templates.MFAVerify,
+		LogoutTemplateFilepath:          yamlConfig.Templates.Logout,
+		DeviceTemplateFilepath:          yamlConfig.Templates.Device,
+		ErrorTemplateFilepath:           yamlConfig.Templates.Error,
+		ProfileTemplateFilepath:         yamlConfig.Templates.Profile,
+		ProfilePasswordTemplateFilepath: yamlConfig.Templates.ProfilePassword,
+		ProfileMFATemplateFilepath:      yamlConfig.Templates.ProfileMFA,
+		SetupTemplateFilepath:           yamlConfig.Templates.Setup,
+		AllowImplicitFlow:               yamlConfig.Grants.Implicit,
+		AllowPasswordGrant:              yamlConfig.Grants.Password,
 
 		AccessTTL:  time.Duration(yamlConfig.TTL.Access) * time.Minute,
 		RefreshTTL: time.Duration(yamlConfig.TTL.Refresh) * time.Minute,

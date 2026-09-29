@@ -32,12 +32,16 @@ const (
 )
 
 type Builder struct {
-	Name                  string
-	MasterKey             string
-	Issuer                string
-	Audience              string
-	RequireMFA            bool
-	ReuseRefreshTokens    bool
+	Name               string
+	MasterKey          string
+	Issuer             string
+	Audience           string
+	RequireMFA         bool
+	ReuseRefreshTokens bool
+	// AllowImplicitFlow and AllowPasswordGrant enable the discouraged flows
+	// (RFC 9700) for the clients that list them in their grant types
+	AllowImplicitFlow     bool
+	AllowPasswordGrant    bool
 	PrivateRSAKeyFilepath string
 	PrivateRSAKey         *rsa.PrivateKey
 	// keys used before a key rotation: they are published in the JWKS and
@@ -57,11 +61,22 @@ type Builder struct {
 	CodeTTL    time.Duration
 	CSRFTTL    time.Duration
 
-	BaseTemplateFilepath      string
-	LoginTemplateFilepath     string
-	MFACreateTemplateFilepath string
-	MFAVerifyTemplateFilepath string
-	LogoutTemplateFilepath    string
+	BaseTemplateFilepath            string
+	LoginTemplateFilepath           string
+	MFACreateTemplateFilepath       string
+	MFAVerifyTemplateFilepath       string
+	LogoutTemplateFilepath          string
+	DeviceTemplateFilepath          string
+	ErrorTemplateFilepath           string
+	ProfileTemplateFilepath         string
+	ProfilePasswordTemplateFilepath string
+	ProfileMFATemplateFilepath      string
+	SetupTemplateFilepath           string
+
+	// SetupCode is the code to create the first administrator when the users
+	// are in SQLite and there are none. Empty to generate a random one, that is
+	// written in the log.
+	SetupCode string
 
 	ClientStore      domain.ClientStore
 	GrantStore       domain.GrantStore
@@ -71,6 +86,7 @@ type Builder struct {
 	MFACodeStore     domain.MFACodeStore
 	// ClientAssertionStore keeps the used jti of the client assertions
 	ClientAssertionStore domain.ClientAssertionStore
+	DeviceCodeStore      domain.DeviceCodeStore
 
 	sqliteFilepath              string
 	sqliteUseInGrants           bool
@@ -133,6 +149,8 @@ type Client struct {
 	JWKSURI        string
 	PublicKeyPaths []string
 	PublicKeys     []crypto.PublicKey
+	// GrantTypes are the grant types the client can use (default: authorization_code and refresh_token)
+	GrantTypes []string
 }
 
 type User struct {
@@ -226,11 +244,17 @@ func (b *Builder) validate() error {
 	if b.MasterKey != "" && len(b.MasterKey) < cryptography.MinMasterKeyLength {
 		return fmt.Errorf("masterkey must have at least %d characters", cryptography.MinMasterKeyLength)
 	}
+	if b.SetupCode != "" && len(b.SetupCode) < minSetupCodeLength {
+		return fmt.Errorf("the setup code must have at least %d characters", minSetupCodeLength)
+	}
 	if b.PrivateRSAKeyFilepath != "" && b.PrivateRSAKey != nil {
 		return errors.New("private key and private key filepath are mutually exclusive")
 	}
 	if b.sqliteFilepath == "" && (b.sqliteUseInGrants || b.sqliteUseInSessions || b.sqliteUseInMFA || b.sqliteUseInClientAssertions || b.sqliteUseInUsers || b.sqliteUseInClients) {
 		return errors.New("sqlite filepath is required")
+	}
+	if b.sqliteUseInGrants && b.DeviceCodeStore != nil {
+		return errors.New("sqlite grant store and device code store are mutually exclusive")
 	}
 	if b.sqliteUseInGrants && b.GrantStore != nil {
 		return errors.New("sqlite grant store and grant store are mutually exclusive")
@@ -289,6 +313,8 @@ const (
 	defaultCodeTTL    = 5
 	defaultCSRFTTL    = 5
 	defaultRSASize    = 2048
+	// minSetupCodeLength is the minimum length of a configured setup code
+	minSetupCodeLength = 12
 )
 
 func (b *Builder) assignDefaults() error {
@@ -347,6 +373,24 @@ func (b *Builder) assignDefaults() error {
 	if b.LogoutTemplateFilepath == "" {
 		b.LogoutTemplateFilepath = "templates/logout.html"
 	}
+	if b.ErrorTemplateFilepath == "" {
+		b.ErrorTemplateFilepath = "templates/error.html"
+	}
+	if b.DeviceTemplateFilepath == "" {
+		b.DeviceTemplateFilepath = "templates/device.html"
+	}
+	if b.ProfileTemplateFilepath == "" {
+		b.ProfileTemplateFilepath = "templates/profile.html"
+	}
+	if b.ProfilePasswordTemplateFilepath == "" {
+		b.ProfilePasswordTemplateFilepath = "templates/profile_password.html"
+	}
+	if b.ProfileMFATemplateFilepath == "" {
+		b.ProfileMFATemplateFilepath = "templates/profile_mfa.html"
+	}
+	if b.SetupTemplateFilepath == "" {
+		b.SetupTemplateFilepath = "templates/setup.html"
+	}
 
 	return nil
 }
@@ -378,11 +422,21 @@ func (b *Builder) config() (*domain.Config, error) {
 		CodeTTL:    b.CodeTTL,
 		CSRFTTL:    b.CSRFTTL,
 
-		BaseTemplateFilepath:      b.BaseTemplateFilepath,
-		LoginTemplateFilepath:     b.LoginTemplateFilepath,
-		MFACreateTemplateFilepath: b.MFACreateTemplateFilepath,
-		MFAVerifyTemplateFilepath: b.MFAVerifyTemplateFilepath,
-		LogoutTemplateFilepath:    b.LogoutTemplateFilepath,
+		BaseTemplateFilepath:            b.BaseTemplateFilepath,
+		LoginTemplateFilepath:           b.LoginTemplateFilepath,
+		MFACreateTemplateFilepath:       b.MFACreateTemplateFilepath,
+		MFAVerifyTemplateFilepath:       b.MFAVerifyTemplateFilepath,
+		LogoutTemplateFilepath:          b.LogoutTemplateFilepath,
+		DeviceTemplateFilepath:          b.DeviceTemplateFilepath,
+		ErrorTemplateFilepath:           b.ErrorTemplateFilepath,
+		ProfileTemplateFilepath:         b.ProfileTemplateFilepath,
+		ProfilePasswordTemplateFilepath: b.ProfilePasswordTemplateFilepath,
+		ProfileMFATemplateFilepath:      b.ProfileMFATemplateFilepath,
+		SetupTemplateFilepath:           b.SetupTemplateFilepath,
+		SetupCode:                       b.SetupCode,
+
+		AllowImplicitFlow:  b.AllowImplicitFlow,
+		AllowPasswordGrant: b.AllowPasswordGrant,
 
 		AdminEnabled: b.AdminEnabled,
 		AdminGroup:   b.AdminGroup,
@@ -513,6 +567,16 @@ func (b *Builder) assignStores(config *domain.Config) error {
 	config.MFACodeStore = mfaStore
 	config.UserBlockedStore = userBlockedStore
 
+	// the device codes are grants: they are stored with the other grants
+	switch {
+	case b.sqliteUseInGrants:
+		config.DeviceCodeStore = stores.NewSqliteDeviceCodeStore(sqlite)
+	case b.DeviceCodeStore == nil:
+		config.DeviceCodeStore = stores.NewDeviceCodeStore()
+	default:
+		config.DeviceCodeStore = b.DeviceCodeStore
+	}
+
 	switch {
 	case b.sqliteUseInClientAssertions:
 		config.ClientAssertionStore = stores.NewSqliteClientAssertionStore(sqlite)
@@ -568,6 +632,7 @@ func (b *Builder) seedClients(clientStore domain.ClientStore) error {
 			TokenEndpointAuthMethod: c.TokenEndpointAuthMethod,
 			JWKSURI:                 c.JWKSURI,
 			PublicKeys:              publicKeys,
+			GrantTypes:              c.GrantTypes,
 		})
 		if err != nil {
 			return fmt.Errorf("seed clients: %w", err)
@@ -642,7 +707,11 @@ func (b *Builder) validateLDAPServer() error {
 // validateTemplates checks that the template files exist, so a wrong path or
 // working directory fails with a clear error on start up
 func (b *Builder) validateTemplates() error {
-	for _, path := range []string{b.BaseTemplateFilepath, b.LoginTemplateFilepath, b.MFACreateTemplateFilepath, b.MFAVerifyTemplateFilepath, b.LogoutTemplateFilepath} {
+	for _, path := range []string{
+		b.BaseTemplateFilepath, b.LoginTemplateFilepath, b.MFACreateTemplateFilepath, b.MFAVerifyTemplateFilepath, b.LogoutTemplateFilepath,
+		b.DeviceTemplateFilepath, b.ErrorTemplateFilepath, b.ProfileTemplateFilepath, b.ProfilePasswordTemplateFilepath, b.ProfileMFATemplateFilepath,
+		b.SetupTemplateFilepath,
+	} {
 		if _, err := os.Stat(path); err != nil {
 			return fmt.Errorf("template not found: %s (the paths are relative to the working directory)", path)
 		}

@@ -1,0 +1,86 @@
+/*
+ * minioidc design system: the components shared by the pages of the server
+ * (templates/) and the admin web (web/admin). They are Tailwind utilities, so
+ * they work with @apply and with the variants (hover:, dark:, sm:…).
+ *
+ * Colors: slate for the surfaces and the text, indigo for the actions, red,
+ * amber and emerald for the states. The dark mode follows the system.
+ */
+
+@utility btn {
+  @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition-colors select-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 disabled:cursor-not-allowed disabled:opacity-50;
+}
+
+@utility btn-primary {
+  @apply btn bg-indigo-600 text-white shadow-xs hover:bg-indigo-500 active:bg-indigo-700;
+}
+
+@utility btn-secondary {
+  @apply btn border border-slate-300 bg-white text-slate-700 shadow-xs hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800;
+}
+
+@utility btn-danger {
+  @apply btn bg-red-600 text-white shadow-xs hover:bg-red-500 active:bg-red-700;
+}
+
+@utility btn-ghost {
+  @apply btn px-2.5 font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100;
+}
+
+@utility btn-block {
+  @apply w-full py-2.5;
+}
+
+@utility input {
+  @apply block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-base text-slate-900 shadow-xs placeholder:text-slate-400 focus:border-indigo-500 focus:ring-3 focus:ring-indigo-500/20 focus:outline-none disabled:bg-slate-100 disabled:text-slate-500 sm:text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500 dark:disabled:bg-slate-800;
+}
+
+/* one input for the 6 digits of a TOTP code (or a device user code) */
+@utility code-input {
+  @apply input text-center font-mono text-2xl tracking-[0.4em] sm:text-2xl;
+}
+
+@utility label {
+  @apply mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300;
+}
+
+@utility hint {
+  @apply mt-1.5 text-xs text-slate-500 dark:text-slate-400;
+}
+
+@utility card {
+  @apply rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900;
+}
+
+@utility badge {
+  @apply inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium;
+}
+
+@utility alert {
+  @apply block rounded-lg border px-3.5 py-3 text-sm;
+}
+
+@utility alert-error {
+  @apply alert border-red-200 bg-red-50 text-red-800 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300;
+}
+
+@utility alert-success {
+  @apply alert border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-300;
+}
+
+@utility alert-warning {
+  @apply alert border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-300;
+}
+
+@utility alert-info {
+  @apply alert border-indigo-200 bg-indigo-50 text-indigo-900 dark:border-indigo-900/60 dark:bg-indigo-950/40 dark:text-indigo-200;
+}
+
+@utility link {
+  @apply font-medium text-indigo-600 underline-offset-2 hover:underline dark:text-indigo-400;
+}
+
+/* the letter of the server name in the header (the brand) */
+@utility brand-mark {
+  @apply inline-flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-600 text-sm font-bold text-white shadow-sm;
+}

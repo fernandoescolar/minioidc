@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/fernandoescolar/minioidc/internal/api/handlers"
 	"github.com/fernandoescolar/minioidc/internal/api/utils"
 	"github.com/fernandoescolar/minioidc/pkg/domain"
 )
@@ -29,20 +30,24 @@ const adminUserKey contextKey = "admin_user"
 
 // Handler serves the admin web and API
 type Handler struct {
-	now          func() time.Time
-	masterKey    string
-	adminGroup   string
-	issuer       string
-	sessionStore domain.SessionStore
-	userStore    domain.UserStore
-	users        domain.UserAdminStore // nil when the users are read only (LDAP, YAML)
-	clients      domain.ClientAdminStore
-	grantStore   domain.GrantStore
-	mfaStore     domain.MFACodeStore
-	userBlocked  domain.UserBlockedStore
-	assertions   domain.ClientAssertionStore
-	ui           fs.FS
-	mux          *http.ServeMux
+	now           func() time.Time
+	masterKey     string
+	name          string
+	adminGroup    string
+	issuer        string
+	allowImplicit bool
+	allowPassword bool
+	sessionStore  domain.SessionStore
+	userStore     domain.UserStore
+	users         domain.UserAdminStore // nil when the users are read only (LDAP, YAML)
+	clients       domain.ClientAdminStore
+	grantStore    domain.GrantStore
+	mfaStore      domain.MFACodeStore
+	userBlocked   domain.UserBlockedStore
+	assertions    domain.ClientAssertionStore
+	ui            fs.FS
+	errors        *handlers.ErrorPage
+	mux           *http.ServeMux
 }
 
 var _ http.Handler = (*Handler)(nil)
@@ -56,20 +61,24 @@ func NewHandler(config *domain.Config, now func() time.Time) (*Handler, error) {
 
 	users, _ := config.UserStore.(domain.UserAdminStore)
 	h := &Handler{
-		now:          now,
-		masterKey:    config.MasterKey,
-		adminGroup:   config.AdminGroup,
-		issuer:       config.Issuer,
-		sessionStore: config.SessionStore,
-		userStore:    config.UserStore,
-		users:        users,
-		clients:      clients,
-		grantStore:   config.GrantStore,
-		mfaStore:     config.MFACodeStore,
-		userBlocked:  config.UserBlockedStore,
-		assertions:   config.ClientAssertionStore,
-		ui:           uiFS(),
-		mux:          http.NewServeMux(),
+		now:           now,
+		masterKey:     config.MasterKey,
+		name:          config.Name,
+		adminGroup:    config.AdminGroup,
+		issuer:        config.Issuer,
+		allowImplicit: config.AllowImplicitFlow,
+		allowPassword: config.AllowPasswordGrant,
+		sessionStore:  config.SessionStore,
+		userStore:     config.UserStore,
+		users:         users,
+		clients:       clients,
+		grantStore:    config.GrantStore,
+		mfaStore:      config.MFACodeStore,
+		userBlocked:   config.UserBlockedStore,
+		assertions:    config.ClientAssertionStore,
+		ui:            uiFS(),
+		errors:        handlers.NewErrorPage(config),
+		mux:           http.NewServeMux(),
 	}
 
 	h.routes()
@@ -137,7 +146,7 @@ func (h *Handler) requireAdmin(next http.Handler) http.Handler {
 			if isAPI {
 				writeError(w, status, http.StatusText(status))
 			} else {
-				http.Error(w, "Forbidden: you are not an administrator", http.StatusForbidden)
+				h.errors.Render(w, http.StatusForbidden, "Access denied", "Only the administrators can use the admin web.")
 			}
 			return
 		}
@@ -192,9 +201,13 @@ func (h *Handler) serveUI(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) info(w http.ResponseWriter, r *http.Request) {
 	user := adminFromContext(r)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"name":           h.name,
 		"issuer":         h.issuer,
 		"admin_group":    h.adminGroup,
 		"users_readonly": h.users == nil,
+		// the discouraged flows must be enabled in the configuration
+		"allow_implicit_flow":  h.allowImplicit,
+		"allow_password_grant": h.allowPassword,
 		"me": map[string]string{
 			"subject":            user.ID(),
 			"preferred_username": user.Data().PreferredUsername,

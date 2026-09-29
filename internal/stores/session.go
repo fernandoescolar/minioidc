@@ -63,10 +63,11 @@ func (ss *miniSessionStore) VerifyMFA(id string) error {
 		return errors.New("session not found")
 	}
 
-	session := v.(*miniSession)
+	// copy on write: the stored sessions are read concurrently
+	session := *v.(*miniSession)
 	session.requireMFA = false
 	session.mfaVerified = true
-	ss.Store(id, session)
+	ss.Store(id, &session)
 
 	return nil
 }
@@ -78,9 +79,9 @@ func (ss *miniSessionStore) UpdateTTL(id string, expiresAt time.Time) error {
 		return errors.New("session not found")
 	}
 
-	session := v.(*miniSession)
+	session := *v.(*miniSession)
 	session.expiresAt = expiresAt
-	ss.Store(id, session)
+	ss.Store(id, &session)
 
 	return nil
 }

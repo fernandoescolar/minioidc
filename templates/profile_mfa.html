@@ -1,0 +1,68 @@
+{{ define "title" }}Two-step verification · {{ .Name }}{{ end }}
+{{ define "content" }}
+<div class="stack">
+    <div>
+        <a class="link text-sm" href="{{ basePath }}/profile">‹ Your account</a>
+        <h1 class="page-title mt-2">Two-step verification</h1>
+        <p class="page-subtitle">{{ if .MFACodes }}Your account is protected with an authenticator app.{{ else }}Add an authenticator app to protect your account.{{ end }}</p>
+    </div>
+
+    {{ if .Success }}<div class="alert-success" role="status">Authenticator updated successfully.</div>{{ end }}
+    {{ if .InvalidCode }}<div class="alert-error" role="alert">Invalid verification code of the new app.</div>{{ end }}
+    {{ if .InvalidCurrentCode }}<div class="alert-error" role="alert">Invalid code of your current authenticator.</div>{{ end }}
+    {{ if .TooManyAttempts }}<div class="alert-error" role="alert">Too many failed attempts. Try it again later.</div>{{ end }}
+    {{ if .FormExpired }}<div class="alert-warning" role="alert">The form has expired. Please try again.</div>{{ end }}
+    {{ if .UnknownError }}<div class="alert-error" role="alert">Something went wrong. Try it again later or contact the administrator.</div>{{ end }}
+
+    {{ if .MFACodes }}
+    <section class="stack">
+        <h2 class="text-sm font-semibold">Your authenticators</h2>
+        <p class="hint mt-0">To remove one, confirm it with a code of one of your current authenticators.</p>
+        <ul class="menu">
+            {{ range $index, $code := .MFACodes }}
+            <li class="py-3">
+                <form class="flex flex-wrap items-center gap-2" method="post">
+                    <span class="mr-auto text-sm">Authenticator app {{ inc $index }}</span>
+                    <label class="sr-only" for="current_code_{{ $index }}">Current code</label>
+                    <input class="input w-32 text-center font-mono" id="current_code_{{ $index }}" name="current_code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="\d{6}" placeholder="Code" required>
+                    <input type="hidden" name="action" value="delete">
+                    <input type="hidden" name="id" value="{{ $code.ID }}">
+                    <input type="hidden" name="__csrf" value="{{ $.CSRF }}">
+                    <button class="btn-secondary text-red-600 dark:text-red-400" type="submit">Remove</button>
+                </form>
+            </li>
+            {{ end }}
+        </ul>
+    </section>
+    <hr class="border-slate-200 dark:border-slate-800">
+    {{ end }}
+
+    <section class="stack">
+        <h2 class="text-sm font-semibold">{{ if .MFACodes }}Add another authenticator{{ else }}Add an authenticator{{ end }}</h2>
+        <p class="text-sm text-slate-600 dark:text-slate-400">1. Scan this QR code with your authenticator app</p>
+        <div class="qr" id="qrcode" data-qr="{{ .QRCode }}"></div>
+        <details class="text-sm">
+            <summary class="link cursor-pointer">Can't scan it? Enter the key</summary>
+            <p class="secret mt-2">{{ .IV }}</p>
+        </details>
+        <form class="stack" method="post">
+            <div>
+                <label class="label" for="verification_code">2. Enter the 6-digit code of the new app</label>
+                <input class="code-input" id="verification_code" name="verification_code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="\d{6}" placeholder="000000" required>
+            </div>
+            {{ if .MFACodes }}
+            <div>
+                <label class="label" for="current_code_add">Code of a current authenticator</label>
+                <input class="input text-center font-mono" id="current_code_add" name="current_code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="\d{6}" required>
+            </div>
+            {{ end }}
+            <input type="hidden" name="action" value="add">
+            <input type="hidden" name="verification_iv" value="{{ .IV }}">
+            <input type="hidden" name="__csrf" value="{{ .CSRF }}">
+            <button class="btn-primary btn-block" type="submit">Add authenticator</button>
+        </form>
+    </section>
+</div>
+<script src="{{ basePath }}/static/qrcode.min.js"></script>
+<script defer src="{{ basePath }}/static/qrcode.gen.js"></script>
+{{ end }}

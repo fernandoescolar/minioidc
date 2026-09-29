@@ -23,6 +23,8 @@ type LoginHandler struct {
 	requireMFA    bool
 	secureCookies bool
 	home          string
+	setup         *SetupHandler
+	setupURL      string
 }
 
 type loginModel struct {
@@ -31,12 +33,15 @@ type loginModel struct {
 	InvalidLogin    bool
 	TooManyAttempts bool
 	UnknownError    bool
+	FormExpired     bool
 	CSRF            string
 }
 
 var _ http.Handler = (*LoginHandler)(nil)
 
-func NewLoginHandler(config *domain.Config, now func() time.Time) *LoginHandler {
+// NewLoginHandler creates the login page. While the setup is pending (there
+// are no users), it sends the users to setupURL.
+func NewLoginHandler(config *domain.Config, now func() time.Time, setup *SetupHandler, setupURL string) *LoginHandler {
 	return &LoginHandler{
 		name:          config.Name,
 		now:           now,
@@ -49,10 +54,17 @@ func NewLoginHandler(config *domain.Config, now func() time.Time) *LoginHandler 
 		requireMFA:    config.RequireMFA,
 		secureCookies: config.UseSecureCookie,
 		home:          config.BasePath + "/",
+		setup:         setup,
+		setupURL:      setupURL,
 	}
 }
 
 func (h *LoginHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if h.setup.Pending() {
+		http.Redirect(w, r, h.setupURL, http.StatusFound)
+		return
+	}
+
 	switch r.Method {
 	case http.MethodGet:
 		h.render(w, loginModel{CSRF: utils.GetCSRFToken(r), Username: loginHint(r)})
@@ -65,7 +77,7 @@ func (h *LoginHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (h *LoginHandler) postHTTP(w http.ResponseWriter, r *http.Request) {
 	if !utils.GetCSRFValid(r) {
-		http.Error(w, "Bad Request", http.StatusBadRequest)
+		h.renderStatus(w, http.StatusBadRequest, loginModel{Username: r.PostFormValue("username"), CSRF: utils.GetCSRFToken(r), FormExpired: true})
 		return
 	}
 
@@ -129,6 +141,10 @@ func loginHint(r *http.Request) string {
 }
 
 func (h *LoginHandler) render(w http.ResponseWriter, model loginModel) {
+	h.renderStatus(w, http.StatusOK, model)
+}
+
+func (h *LoginHandler) renderStatus(w http.ResponseWriter, status int, model loginModel) {
 	model.Name = h.name
-	utils.RenderTemplate(w, h.template, model)
+	utils.RenderTemplateStatus(w, status, h.template, model)
 }

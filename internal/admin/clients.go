@@ -17,6 +17,7 @@ type clientDTO struct {
 	PostLogoutRedirectURIs  []string `json:"post_logout_redirect_uris"`
 	JWKSURI                 string   `json:"jwks_uri"`
 	PublicKeys              []string `json:"public_keys"`
+	GrantTypes              []string `json:"grant_types"`
 	HasSecret               bool     `json:"has_secret"`
 	// Secret is only returned once: when it is generated
 	Secret string `json:"secret,omitempty"`
@@ -31,6 +32,7 @@ type clientInput struct {
 	PostLogoutRedirectURIs  []string `json:"post_logout_redirect_uris"`
 	JWKSURI                 string   `json:"jwks_uri"`
 	PublicKeys              []string `json:"public_keys"`
+	GrantTypes              []string `json:"grant_types"`
 }
 
 func clientToDTO(data domain.ClientData) clientDTO {
@@ -48,6 +50,7 @@ func clientToDTO(data domain.ClientData) clientDTO {
 		PostLogoutRedirectURIs:  nonNil(data.PostLogoutRedirectURIs),
 		JWKSURI:                 data.JWKSURI,
 		PublicKeys:              keys,
+		GrantTypes:              grantTypes(data),
 		HasSecret:               data.SecretHash != "" || data.Secret != "",
 	}
 }
@@ -269,7 +272,17 @@ func (h *Handler) clientData(w http.ResponseWriter, input clientInput) (domain.C
 		PostLogoutRedirectURIs:  postLogoutRedirectURIs,
 		JWKSURI:                 jwksURI,
 		PublicKeys:              publicKeys,
+		GrantTypes:              input.GrantTypes,
 	}, true
+}
+
+// grantTypes returns the grant types of the client (the defaults when it has none)
+func grantTypes(data domain.ClientData) []string {
+	if len(data.GrantTypes) == 0 {
+		return append([]string{}, domain.DefaultGrantTypes...)
+	}
+
+	return append([]string{}, data.GrantTypes...)
 }
 
 // validURLs checks that the values are absolute URLs without fragment (RFC 6749 section 3.1.2)

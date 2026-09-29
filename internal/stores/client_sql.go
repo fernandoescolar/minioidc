@@ -11,7 +11,7 @@ import (
 	"github.com/fernandoescolar/minioidc/pkg/domain"
 )
 
-const clientColumns = "id, secretHash, encryptedSecret, redirectURIs, postLogoutRedirectURIs, authMethod, jwksURI, publicKeys"
+const clientColumns = "id, secretHash, encryptedSecret, redirectURIs, postLogoutRedirectURIs, authMethod, jwksURI, publicKeys, grantTypes"
 
 type sqlClientStore struct {
 	db        *sql.DB
@@ -30,7 +30,7 @@ func (cs *sqlClientStore) NewClient(data domain.ClientData) (domain.Client, erro
 		return nil, err
 	}
 
-	_, err = cs.db.Exec("INSERT INTO clients("+clientColumns+") VALUES(?,?,?,?,?,?,?,?);", values...)
+	_, err = cs.db.Exec("INSERT INTO clients("+clientColumns+") VALUES(?,?,?,?,?,?,?,?,?);", values...)
 	if err != nil {
 		return nil, fmt.Errorf("NewClient: %w", err)
 	}
@@ -80,7 +80,7 @@ func (cs *sqlClientStore) UpdateClient(data domain.ClientData) error {
 	// the id goes at the end, for the WHERE
 	values = append(values[1:], data.ID)
 	r, err := cs.db.Exec(`UPDATE clients SET secretHash = ?, encryptedSecret = ?, redirectURIs = ?, postLogoutRedirectURIs = ?,
-		authMethod = ?, jwksURI = ?, publicKeys = ? WHERE id = ?;`, values...)
+		authMethod = ?, jwksURI = ?, publicKeys = ?, grantTypes = ? WHERE id = ?;`, values...)
 	if err != nil {
 		return fmt.Errorf("UpdateClient: %w", err)
 	}
@@ -124,18 +124,19 @@ func (cs *sqlClientStore) values(data domain.ClientData) ([]interface{}, error) 
 	redirectURIs, _ := json.Marshal(nonNil(data.RedirectURIs))
 	postLogoutRedirectURIs, _ := json.Marshal(nonNil(data.PostLogoutRedirectURIs))
 	keys, _ := json.Marshal(publicKeys)
+	grantTypes, _ := json.Marshal(nonNil(data.GrantTypes))
 
 	return []interface{}{
 		data.ID, data.SecretHash, encryptedSecret, string(redirectURIs), string(postLogoutRedirectURIs),
-		data.TokenEndpointAuthMethod, data.JWKSURI, string(keys),
+		data.TokenEndpointAuthMethod, data.JWKSURI, string(keys), string(grantTypes),
 	}, nil
 }
 
 func (cs *sqlClientStore) scan(row scanner) (*domain.ClientData, error) {
 	data := &domain.ClientData{}
-	var encryptedSecret, redirectURIs, postLogoutRedirectURIs, publicKeys string
+	var encryptedSecret, redirectURIs, postLogoutRedirectURIs, publicKeys, grantTypes string
 	err := row.Scan(&data.ID, &data.SecretHash, &encryptedSecret, &redirectURIs, &postLogoutRedirectURIs,
-		&data.TokenEndpointAuthMethod, &data.JWKSURI, &publicKeys)
+		&data.TokenEndpointAuthMethod, &data.JWKSURI, &publicKeys, &grantTypes)
 	if err != nil {
 		return nil, err
 	}
@@ -147,7 +148,9 @@ func (cs *sqlClientStore) scan(row scanner) (*domain.ClientData, error) {
 	}
 
 	var pems []string
-	for target, value := range map[*[]string]string{&data.RedirectURIs: redirectURIs, &data.PostLogoutRedirectURIs: postLogoutRedirectURIs, &pems: publicKeys} {
+	for target, value := range map[*[]string]string{
+		&data.RedirectURIs: redirectURIs, &data.PostLogoutRedirectURIs: postLogoutRedirectURIs, &pems: publicKeys, &data.GrantTypes: grantTypes,
+	} {
 		if err := json.Unmarshal([]byte(value), target); err != nil {
 			return nil, fmt.Errorf("client %s: %w", data.ID, err)
 		}

@@ -54,8 +54,8 @@ func (gs *sqlGrantStore) NewRefreshTokenGrant(id, familyID string, client domain
 
 func (gs *sqlGrantStore) insert(data domain.GrantData, client domain.Client, session domain.Session) (domain.Grant, error) {
 	_, err := gs.db.Exec(
-		"INSERT INTO grants(id, familyID, used, grantType, clientID, sessionID, expiresAt, scopes, nonce, codeChallenge, codeChallengeMethod, redirectURI) VALUES(?,?,?,?,?,?,?,?,?,?,?,?);",
-		data.ID, data.FamilyID, false, data.GrantType, client.ClientID(), session.ID(), data.ExpiresAt, strings.Join(data.Scopes, " "),
+		"INSERT INTO grants(id, familyID, used, grantType, clientID, sessionID, issuedAt, expiresAt, scopes, nonce, codeChallenge, codeChallengeMethod, redirectURI) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?);",
+		data.ID, data.FamilyID, false, data.GrantType, client.ClientID(), session.ID(), time.Now(), data.ExpiresAt, strings.Join(data.Scopes, " "),
 		data.Nonce, data.CodeChallenge, data.CodeChallengeMethod, data.RedirectURI,
 	)
 	if err != nil {
@@ -148,10 +148,10 @@ func (gs *sqlGrantStore) RevokeClient(clientID string) error {
 	return nil
 }
 
-// CleanExpired deletes all expired grants
+// CleanExpired deletes all expired grants. The dates are compared in Go: they
+// are stored as text with their time zone, so SQL cannot compare them.
 func (gs *sqlGrantStore) CleanExpired() {
-	_, err := gs.db.Exec("DELETE FROM grants WHERE expiresAt < ?;", time.Now())
-	if err != nil {
-		log.Printf("WRN Grants CleanExpired: %v", err)
+	if err := deleteExpired(gs.db, "grants", time.Now()); err != nil {
+		log.Printf("WRN grants CleanExpired: %v", err)
 	}
 }

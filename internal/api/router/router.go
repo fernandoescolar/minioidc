@@ -16,25 +16,32 @@ import (
 const clientJWKSTimeout = 5 * time.Second
 
 const (
-	IssuerBase            = "/"
-	OAuthEndpoint         = "/"
-	WellKnownEndpoint     = "/.well-known/"
-	AuthorizationEndpoint = OAuthEndpoint + "authorize"
-	TokenEndpoint         = OAuthEndpoint + "token"
-	UserinfoEndpoint      = OAuthEndpoint + "userinfo"
-	RevokeEndpoint        = OAuthEndpoint + "revoke"
-	IntrospectionEndpoint = OAuthEndpoint + "introspect"
-	JWKSEndpoint          = WellKnownEndpoint + "jwks.json"
-	DiscoveryEndpoint     = WellKnownEndpoint + "openid-configuration"
-	MFAEnpoint            = "/mfa/"
-	MFACreateEndpoint     = MFAEnpoint + "create"
-	MFAVerifyEndpoint     = MFAEnpoint + "verify"
-	LoginEndpoint         = "/login"
-	LogoutEndpoint        = "/logout"
-	HealthEndpoint        = "/healthz"
-	AdminEndpoint         = "/admin"
-	AdminAPIEndpoint      = AdminEndpoint + "/api/"
-	StaticEndpoint        = "/static/"
+	IssuerBase                  = "/"
+	OAuthEndpoint               = "/connect/"
+	WellKnownEndpoint           = "/.well-known/"
+	AuthorizationEndpoint       = OAuthEndpoint + "authorize"
+	TokenEndpoint               = OAuthEndpoint + "token"
+	UserinfoEndpoint            = OAuthEndpoint + "userinfo"
+	RevokeEndpoint              = OAuthEndpoint + "revoke"
+	IntrospectionEndpoint       = OAuthEndpoint + "introspect"
+	EndSessionEndpoint          = OAuthEndpoint + "endsession"
+	DeviceAuthorizationEndpoint = OAuthEndpoint + "deviceauthorization"
+	DeviceEndpoint              = OAuthEndpoint + "device"
+	JWKSEndpoint                = WellKnownEndpoint + "jwks.json"
+	DiscoveryEndpoint           = WellKnownEndpoint + "openid-configuration"
+	MFAEnpoint                  = "/mfa/"
+	MFACreateEndpoint           = MFAEnpoint + "create"
+	MFAVerifyEndpoint           = MFAEnpoint + "verify"
+	LoginEndpoint               = "/login"
+	ProfileEndpoint             = "/profile"
+	ProfilePasswordEndpoint     = ProfileEndpoint + "/password"
+	ProfileMFAEndpoint          = ProfileEndpoint + "/mfa"
+	HealthEndpoint              = "/healthz"
+	SetupEndpoint               = "/setup"
+	WelcomeEndpoint             = "/welcome"
+	AdminEndpoint               = "/admin"
+	AdminAPIEndpoint            = AdminEndpoint + "/api/"
+	StaticEndpoint              = "/static/"
 )
 
 // CreateMinioidcRoutes registers the endpoints under the path of the issuer
@@ -50,14 +57,16 @@ func CreateMinioidcRoutes(mux *http.ServeMux, config *domain.Config, now func() 
 	forwardedHeaders := middlewares.NewForwardedHeaders(config)
 	hstsMiddleware := middlewares.NewHSTS(config)
 	corsMiddleware := middlewares.NewCORS([]string{
-		path(TokenEndpoint), path(UserinfoEndpoint), path(RevokeEndpoint), path(IntrospectionEndpoint), path(DiscoveryEndpoint), path(JWKSEndpoint),
+		path(TokenEndpoint), path(UserinfoEndpoint), path(RevokeEndpoint), path(IntrospectionEndpoint), path(DeviceAuthorizationEndpoint),
+		path(DiscoveryEndpoint), path(JWKSEndpoint),
 	})
 	cspMiddleware := middlewares.NewCSP(config)
 	csrfMiddleware := middlewares.NewCSRF(config, now)
 	// the authorization endpoint handles the session itself (prompt, max_age...)
 	sessionMiddleware := middlewares.NewSessionAuthorized(config, now, path(LoginEndpoint), []string{
 		path(WellKnownEndpoint), path(AuthorizationEndpoint), path(TokenEndpoint), path(UserinfoEndpoint), path(RevokeEndpoint), path(IntrospectionEndpoint),
-		path(StaticEndpoint), path(LoginEndpoint), path(LogoutEndpoint), path(HealthEndpoint),
+		path(DeviceAuthorizationEndpoint), path(StaticEndpoint), path(LoginEndpoint), path(EndSessionEndpoint), path(HealthEndpoint),
+		path(SetupEndpoint),
 		// the admin API answers with JSON errors instead of redirecting to the login
 		path(AdminAPIEndpoint),
 	})
@@ -70,20 +79,30 @@ func CreateMinioidcRoutes(mux *http.ServeMux, config *domain.Config, now func() 
 		Token:         TokenEndpoint,
 		JWKS:          JWKSEndpoint,
 		Userinfo:      UserinfoEndpoint,
-		EndSession:    LogoutEndpoint,
+		EndSession:    EndSessionEndpoint,
 		Revocation:    RevokeEndpoint,
 		Introspection: IntrospectionEndpoint,
-	})
+		Device:        DeviceAuthorizationEndpoint,
+	}, handlers.DiscoveryOptions{AllowImplicitFlow: config.AllowImplicitFlow, AllowPasswordGrant: config.AllowPasswordGrant})
 
 	mux.Handle(path(DiscoveryEndpoint), discoveryHandler)
 	mux.Handle(path(JWKSEndpoint), handlers.NewJWKSHandler(config))
 	mux.Handle(path(AuthorizationEndpoint), handlers.NewAuthorizeHandler(config, now, path(LoginEndpoint), path(MFAVerifyEndpoint)))
 	mux.Handle(path(TokenEndpoint), handlers.NewTokenHandler(config, now, authenticator, endpointURL(TokenEndpoint)))
 	mux.Handle(path(UserinfoEndpoint), handlers.NewUserinfoHandler(config, now))
-	mux.Handle(path(RevokeEndpoint), handlers.NewRevokeHandler(config, authenticator, endpointURL(RevokeEndpoint)))
+	mux.Handle(path(RevokeEndpoint), handlers.NewRevokeHandler(config, now, authenticator, endpointURL(RevokeEndpoint)))
 	mux.Handle(path(IntrospectionEndpoint), handlers.NewIntrospectionHandler(config, now, authenticator, endpointURL(IntrospectionEndpoint)))
-	mux.Handle(path(LoginEndpoint), handlers.NewLoginHandler(config, now))
-	mux.Handle(path(LogoutEndpoint), handlers.NewLogoutHandler(config, now))
+	// the onboarding, while there are no users
+	setupHandler := handlers.NewSetupHandler(config, now, endpointURL(SetupEndpoint), path(LoginEndpoint), path(WelcomeEndpoint))
+	mux.Handle(path(SetupEndpoint), setupHandler)
+	mux.Handle(path(WelcomeEndpoint), setupHandler.Welcome())
+	mux.Handle(path(LoginEndpoint), handlers.NewLoginHandler(config, now, setupHandler, path(SetupEndpoint)))
+	mux.Handle(path(EndSessionEndpoint), handlers.NewLogoutHandler(config, now))
+	mux.Handle(path(DeviceAuthorizationEndpoint), handlers.NewDeviceAuthorizationHandler(config, now, authenticator, endpointURL(DeviceAuthorizationEndpoint), endpointURL(DeviceEndpoint)))
+	mux.Handle(path(DeviceEndpoint), handlers.NewDeviceHandler(config, now))
+	mux.Handle(path(ProfileEndpoint), handlers.NewProfileHandler(config))
+	mux.Handle(path(ProfilePasswordEndpoint), handlers.NewProfilePasswordHandler(config, now))
+	mux.Handle(path(ProfileMFAEndpoint), handlers.NewProfileMFAHandler(config, now, path(ProfileMFAEndpoint)))
 	mux.Handle(path(MFACreateEndpoint), handlers.NewMfaCreateHandler(config, now, path(MFAVerifyEndpoint)))
 	mux.Handle(path(MFAVerifyEndpoint), handlers.NewMfaVerifyHandler(config, now, path(MFACreateEndpoint)))
 	mux.Handle(path(HealthEndpoint), handlers.NewHealthHandler())
@@ -96,8 +115,8 @@ func CreateMinioidcRoutes(mux *http.ServeMux, config *domain.Config, now func() 
 
 		mux.Handle(path(AdminEndpoint)+"/", http.StripPrefix(path(AdminEndpoint), adminHandler))
 	}
-	mux.Handle(path(IssuerBase), handlers.NewWelcomeHandler())
-	mux.Handle(path(StaticEndpoint), http.StripPrefix(path(StaticEndpoint), http.FileServer(http.Dir("static"))))
+	mux.Handle(path(IssuerBase), handlers.NewHomeHandler(config, path(ProfileEndpoint)))
+	mux.Handle(path(StaticEndpoint), revalidate(http.StripPrefix(path(StaticEndpoint), http.FileServer(http.Dir("static")))))
 
 	return createMiddlewareChain(mux,
 		loggerMiddleware,
@@ -109,6 +128,15 @@ func CreateMinioidcRoutes(mux *http.ServeMux, config *domain.Config, now func() 
 		sessionMiddleware,
 		sessionMFARequired,
 		updateSessionTTL)
+}
+
+// revalidate makes the browsers check if the static files have changed (a
+// cheap 304 when they have not), so they do not keep the files of an old version
+func revalidate(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-cache")
+		next.ServeHTTP(w, r)
+	})
 }
 
 func createMiddlewareChain(mux *http.ServeMux, middlewares ...domain.Middleware) http.Handler {

@@ -171,11 +171,11 @@ func (ss *sqlSessionStore) DeleteAllSessions() error {
 	return nil
 }
 
-// CleanExpired deletes all expired sessions
+// CleanExpired deletes all expired sessions. The dates are compared in Go: they
+// are stored as text with their time zone, so SQL cannot compare them.
 func (ss *sqlSessionStore) CleanExpired() {
-	_, err := ss.db.Exec("DELETE FROM sessions WHERE expiresAt < ?;", time.Now())
-	if err != nil {
-		log.Println("WRN Session CleanExpired: %w", err)
+	if err := deleteExpired(ss.db, "sessions", time.Now()); err != nil {
+		log.Printf("WRN sessions CleanExpired: %v", err)
 	}
 }
 

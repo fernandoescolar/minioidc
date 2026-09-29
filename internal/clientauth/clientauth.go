@@ -187,53 +187,90 @@ func (a *Authenticator) authenticateAssertion(r *http.Request, assertionType, as
 	)
 	switch {
 	case client.AuthMethodAllowed(domain.AuthMethodClientSecretJWT):
-		secret := []byte(client.Data().Secret)
-		keyFunc = func(*jwt.Token) (interface{}, error) { return secret, nil }
-		algorithms = HMACAlgorithms
+		keyFunc, algorithms = a.secretKey(client), HMACAlgorithms
 	case client.AuthMethodAllowed(domain.AuthMethodPrivateKeyJWT):
-		keyFunc = a.publicKeys(client)
-		algorithms = AsymmetricAlgorithms
+		keyFunc, algorithms = a.publicKeys(client), AsymmetricAlgorithms
 	default:
 		return nil, invalidClient("Client authentication failed", false)
 	}
 
-	claims := &jwt.RegisteredClaims{}
-	_, err = jwt.ParseWithClaims(assertion, claims, keyFunc,
+	if _, err := a.verify(assertion, client.ClientID(), true, keyFunc, algorithms, endpointURL, "client"); err != nil {
+		return nil, invalidClient(err.Error(), false)
+	}
+
+	return client, nil
+}
+
+// VerifyGrantAssertion verifies a JWT bearer authorization grant (RFC 7523
+// section 2.1): an assertion signed by the client with its registered keys
+// (or its client_secret_jwt secret) about a user (the sub claim). It returns
+// the claims of the assertion.
+func (a *Authenticator) VerifyGrantAssertion(client domain.Client, assertion, endpointURL string) (*jwt.RegisteredClaims, error) {
+	data := client.Data()
+	var (
+		keyFunc    jwt.Keyfunc
+		algorithms []string
+	)
+	switch {
+	case data.JWKSURI != "" || len(data.PublicKeys) > 0:
+		keyFunc, algorithms = a.publicKeys(client), AsymmetricAlgorithms
+	case data.Secret != "":
+		keyFunc, algorithms = a.secretKey(client), HMACAlgorithms
+	default:
+		return nil, errors.New("the client has no keys to verify assertions")
+	}
+
+	return a.verify(assertion, client.ClientID(), false, keyFunc, algorithms, endpointURL, "grant")
+}
+
+// verify checks an assertion issued by the client: signature, iss, aud, exp,
+// iat and a jti that can only be used once. When subjectIsClient is true, the
+// sub must be the client (client authentication), otherwise it is required.
+func (a *Authenticator) verify(assertion, clientID string, subjectIsClient bool, keyFunc jwt.Keyfunc, algorithms []string, endpointURL, kind string) (*jwt.RegisteredClaims, error) {
+	options := []jwt.ParserOption{
 		jwt.WithValidMethods(algorithms),
 		jwt.WithIssuer(clientID),
-		jwt.WithSubject(clientID),
 		jwt.WithExpirationRequired(),
 		jwt.WithIssuedAt(),
 		jwt.WithLeeway(clockSkew),
 		jwt.WithTimeFunc(a.now),
-	)
-	if err != nil {
-		return nil, invalidClient(fmt.Sprintf("Invalid client assertion: %v", err), false)
+	}
+	if subjectIsClient {
+		options = append(options, jwt.WithSubject(clientID))
 	}
 
-	if !a.validAudience(claims.Audience, endpointURL) {
-		return nil, invalidClient("Invalid client assertion audience", false)
+	claims := &jwt.RegisteredClaims{}
+	if _, err := jwt.ParseWithClaims(assertion, claims, keyFunc, options...); err != nil {
+		return nil, fmt.Errorf("Invalid %s assertion: %w", kind, err)
 	}
 
-	if claims.ID == "" {
-		return nil, invalidClient("The client assertion must have a jti", false)
-	}
-
-	if claims.ExpiresAt.Sub(a.now()) > maxAssertionLifetime {
-		return nil, invalidClient("The client assertion expiration is too far", false)
+	switch {
+	case claims.Subject == "":
+		return nil, fmt.Errorf("The %s assertion must have a sub", kind)
+	case !a.validAudience(claims.Audience, endpointURL):
+		return nil, fmt.Errorf("Invalid %s assertion audience", kind)
+	case claims.ID == "":
+		return nil, fmt.Errorf("The %s assertion must have a jti", kind)
+	case claims.ExpiresAt.Sub(a.now()) > maxAssertionLifetime:
+		return nil, fmt.Errorf("The %s assertion expiration is too far", kind)
 	}
 
 	// RFC 7523 section 3: the jti can only be used once
-	unused, err := a.assertions.Use(clientID+":"+claims.ID, claims.ExpiresAt.Add(clockSkew), a.now())
+	unused, err := a.assertions.Use(kind+":"+clientID+":"+claims.ID, claims.ExpiresAt.Add(clockSkew), a.now())
 	if err != nil {
 		return nil, err
 	}
 
 	if !unused {
-		return nil, invalidClient("The client assertion has already been used", false)
+		return nil, fmt.Errorf("The %s assertion has already been used", kind)
 	}
 
-	return client, nil
+	return claims, nil
+}
+
+func (a *Authenticator) secretKey(client domain.Client) jwt.Keyfunc {
+	secret := []byte(client.Data().Secret)
+	return func(*jwt.Token) (interface{}, error) { return secret, nil }
 }
 
 func (a *Authenticator) validAudience(audience jwt.ClaimStrings, endpointURL string) bool {

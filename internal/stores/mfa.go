@@ -1,6 +1,7 @@
 package stores
 
 import (
+	"errors"
 	"sync"
 
 	"github.com/fernandoescolar/minioidc/pkg/domain"
@@ -84,10 +85,21 @@ func (ms *miniMFACodeStore) DeleteUserMFACodes(userID string) {
 	ms.Range(func(key, value interface{}) bool {
 		mfaCode := value.(*miniMFACode)
 		if mfaCode.userID == userID {
-			ms.Delete(mfaCode.id)
+			ms.Map.Delete(mfaCode.id)
 		}
 		return true
 	})
+}
+
+// DeleteMFACode deletes an MFACode of the user
+func (ms *miniMFACodeStore) DeleteMFACode(userID, id string) error {
+	v, ok := ms.Load(id)
+	if !ok || v.(*miniMFACode).userID != userID {
+		return errors.New("mfa code not found")
+	}
+
+	ms.Map.Delete(id)
+	return nil
 }
 
 // MFACode converts a miniMFACode to a MFACode

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/fernandoescolar/minioidc/internal/api/utils"
+	"github.com/fernandoescolar/minioidc/internal/credentials"
 	"github.com/fernandoescolar/minioidc/pkg/cryptography"
 	"github.com/fernandoescolar/minioidc/pkg/domain"
 )
@@ -26,7 +27,13 @@ type TokenHandler struct {
 	keypair            *cryptography.Keypair
 	accessTTL          time.Duration
 	refreshTTL         time.Duration
+	sessionTTL         time.Duration
+	allowPassword      bool
 	grantStore         domain.GrantStore
+	sessionStore       domain.SessionStore
+	userStore          domain.UserStore
+	deviceCodeStore    domain.DeviceCodeStore
+	credentials        *credentials.Checker
 	authenticator      ClientAuthenticator
 	endpointURL        string
 }
@@ -51,9 +58,20 @@ func NewTokenHandler(config *domain.Config, now func() time.Time, authenticator 
 		keypair:            config.Keypair,
 		accessTTL:          config.AccessTTL,
 		refreshTTL:         config.RefreshTTL,
+		sessionTTL:         config.SessionTTL,
+		allowPassword:      config.AllowPasswordGrant,
 		grantStore:         config.GrantStore,
-		authenticator:      authenticator,
-		endpointURL:        endpointURL,
+		sessionStore:       config.SessionStore,
+		userStore:          config.UserStore,
+		deviceCodeStore:    config.DeviceCodeStore,
+		credentials: &credentials.Checker{
+			Users:      config.UserStore,
+			MFA:        config.MFACodeStore,
+			Blocked:    config.UserBlockedStore,
+			RequireMFA: config.RequireMFA,
+		},
+		authenticator: authenticator,
+		endpointURL:   endpointURL,
 	}
 }
 
@@ -74,14 +92,27 @@ func (h *TokenHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	grantType := r.PostForm.Get("grant_type")
-	switch grantType {
-	case "authorization_code":
-		h.requestWithCode(w, r, client)
-	case "refresh_token":
-		h.requestWithRefresh(w, r, client)
-	default:
-		utils.Error(w, utils.UnsupportedGrantType, fmt.Sprintf("Invalid grant type: %s", grantType), http.StatusBadRequest)
+	handler, supported := map[string]func(http.ResponseWriter, *http.Request, domain.Client){
+		domain.GrantTypeAuthorizationCode: h.requestWithCode,
+		domain.GrantTypeRefreshToken:      h.requestWithRefresh,
+		domain.GrantTypeClientCredentials: h.requestWithClientCredentials,
+		domain.GrantTypePassword:          h.requestWithPassword,
+		domain.GrantTypeDeviceCode:        h.requestWithDeviceCode,
+		domain.GrantTypeJWTBearer:         h.requestWithJWTBearer,
+	}[grantType]
+
+	// the password grant is discouraged (RFC 9700): it must be enabled in the configuration
+	if !supported || (grantType == domain.GrantTypePassword && !h.allowPassword) {
+		utils.Error(w, utils.UnsupportedGrantType, fmt.Sprintf("Unsupported grant type: %s", grantType), http.StatusBadRequest)
+		return
 	}
+
+	if !client.GrantTypeAllowed(grantType) {
+		utils.Error(w, utils.UnauthorizedClient, "The client is not allowed to use this grant type", http.StatusBadRequest)
+		return
+	}
+
+	handler(w, r, client)
 }
 
 func (h *TokenHandler) requestWithCode(w http.ResponseWriter, r *http.Request, client domain.Client) {
@@ -116,7 +147,7 @@ func (h *TokenHandler) requestWithCode(w http.ResponseWriter, r *http.Request, c
 		}
 	}
 
-	h.writeTokens(w, grant, refreshToken)
+	h.writeTokens(w, grant, refreshToken, true)
 }
 
 func (h *TokenHandler) requestWithRefresh(w http.ResponseWriter, r *http.Request, client domain.Client) {
@@ -147,7 +178,7 @@ func (h *TokenHandler) requestWithRefresh(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	h.writeTokens(w, grant, refreshToken)
+	h.writeTokens(w, grant, refreshToken, true)
 }
 
 // getGrant looks up a valid grant issued to the client
@@ -200,7 +231,9 @@ func (h *TokenHandler) revokeReplayedGrant(grant domain.Grant) {
 	}
 }
 
-func (h *TokenHandler) writeTokens(w http.ResponseWriter, grant domain.Grant, refreshToken string) {
+// writeTokens writes the access token, the refresh token (if any) and, when
+// idToken is true and the scopes have openid, the ID token
+func (h *TokenHandler) writeTokens(w http.ResponseWriter, grant domain.Grant, refreshToken string, idToken bool) {
 	now := h.now()
 	accessToken, err := grant.AccessToken(h.issuer, h.audience, h.accessTTL, h.keypair, now)
 	if err != nil {
@@ -216,8 +249,8 @@ func (h *TokenHandler) writeTokens(w http.ResponseWriter, grant domain.Grant, re
 		Scope:        strings.Join(grant.Scopes(), " "),
 	}
 
-	if grant.HasScope(openidScope) {
-		tokens.IDToken, err = grant.IDToken(h.issuer, h.accessTTL, h.keypair, now, accessToken)
+	if idToken && grant.HasScope(openidScope) {
+		tokens.IDToken, err = grant.IDToken(h.issuer, h.accessTTL, h.keypair, now, accessToken, "")
 		if err != nil {
 			utils.InternalServerError(w, fmt.Sprintf("creating id token: %v", err))
 			return

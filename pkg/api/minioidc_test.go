@@ -80,15 +80,21 @@ func newTestServer(t *testing.T, requireMFA bool, options ...func(*api.Builder))
 	})
 
 	builder := &api.Builder{
-		Issuer:                    issuer,
-		Audience:                  audience,
-		MasterKey:                 "0123456789abcdefghijklmnopqrstuvwxyz",
-		RequireMFA:                requireMFA,
-		BaseTemplateFilepath:      "../../templates/base.html",
-		LoginTemplateFilepath:     "../../templates/login.html",
-		MFACreateTemplateFilepath: "../../templates/mfa_create.html",
-		MFAVerifyTemplateFilepath: "../../templates/mfa_verify.html",
-		LogoutTemplateFilepath:    "../../templates/logout.html",
+		Issuer:                          issuer,
+		Audience:                        audience,
+		MasterKey:                       "0123456789abcdefghijklmnopqrstuvwxyz",
+		RequireMFA:                      requireMFA,
+		BaseTemplateFilepath:            "../../templates/base.html",
+		LoginTemplateFilepath:           "../../templates/login.html",
+		MFACreateTemplateFilepath:       "../../templates/mfa_create.html",
+		MFAVerifyTemplateFilepath:       "../../templates/mfa_verify.html",
+		LogoutTemplateFilepath:          "../../templates/logout.html",
+		DeviceTemplateFilepath:          "../../templates/device.html",
+		ErrorTemplateFilepath:           "../../templates/error.html",
+		ProfileTemplateFilepath:         "../../templates/profile.html",
+		ProfilePasswordTemplateFilepath: "../../templates/profile_password.html",
+		ProfileMFATemplateFilepath:      "../../templates/profile_mfa.html",
+		SetupTemplateFilepath:           "../../templates/setup.html",
 		Clients: []api.Client{
 			{ID: clientID, SecretHash: secretHash, RedirectURIs: []string{redirectURI, redirectURI2}, PostLogoutRedirectURIs: []string{postLogoutURI}},
 			{ID: otherClientID, SecretHash: secretHash, RedirectURIs: []string{redirectURI}},
@@ -167,7 +173,7 @@ func authorizePath(clientID string, extra url.Values) string {
 		params[k] = v
 	}
 
-	return "/authorize?" + params.Encode()
+	return "/connect/authorize?" + params.Encode()
 }
 
 func do(t *testing.T, c *http.Client, req *http.Request) (*http.Response, string) {
@@ -291,7 +297,7 @@ type tokens struct {
 
 func (s *testServer) exchangeCode(t *testing.T, code string) tokens {
 	t.Helper()
-	resp, body := postForm(t, http.DefaultClient, s.url("/token"), url.Values{
+	resp, body := postForm(t, http.DefaultClient, s.url("/connect/token"), url.Values{
 		"grant_type":    {"authorization_code"},
 		"code":          {code},
 		"redirect_uri":  {redirectURI},
@@ -309,7 +315,7 @@ func (s *testServer) exchangeCode(t *testing.T, code string) tokens {
 
 func (s *testServer) refresh(c *http.Client, t *testing.T, refreshToken string) (*http.Response, string) {
 	t.Helper()
-	return postForm(t, c, s.url("/token"), url.Values{
+	return postForm(t, c, s.url("/connect/token"), url.Values{
 		"grant_type":    {"refresh_token"},
 		"refresh_token": {refreshToken},
 		"client_id":     {clientID},
@@ -319,7 +325,7 @@ func (s *testServer) refresh(c *http.Client, t *testing.T, refreshToken string) 
 
 func (s *testServer) userinfo(t *testing.T, accessToken string) (*http.Response, string) {
 	t.Helper()
-	req, _ := http.NewRequest(http.MethodGet, s.url("/userinfo"), nil)
+	req, _ := http.NewRequest(http.MethodGet, s.url("/connect/userinfo"), nil)
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 	return do(t, http.DefaultClient, req)
 }
@@ -347,7 +353,7 @@ func TestAuthorizationCodeFlow(t *testing.T) {
 	}
 
 	// the code can only be used once, and reusing it revokes the refresh tokens issued with it
-	resp, body := postForm(t, http.DefaultClient, s.url("/token"), url.Values{
+	resp, body := postForm(t, http.DefaultClient, s.url("/connect/token"), url.Values{
 		"grant_type": {"authorization_code"}, "code": {code}, "redirect_uri": {redirectURI}, "code_verifier": {codeVerifier},
 	}, basicAuth(clientID, clientSecret))
 	expectError(t, resp, body, http.StatusBadRequest, "invalid_grant")
@@ -379,14 +385,14 @@ func TestAuthorizationCodeFlow(t *testing.T) {
 	expectStatus(t, resp, body, http.StatusOK)
 
 	// revocation
-	resp, body = postForm(t, http.DefaultClient, s.url("/revoke"), url.Values{"token": {refreshed.RefreshToken}}, basicAuth(clientID, clientSecret))
+	resp, body = postForm(t, http.DefaultClient, s.url("/connect/revoke"), url.Values{"token": {refreshed.RefreshToken}}, basicAuth(clientID, clientSecret))
 	expectStatus(t, resp, body, http.StatusOK)
 	resp, body = s.refresh(http.DefaultClient, t, refreshed.RefreshToken)
 	expectError(t, resp, body, http.StatusBadRequest, "invalid_grant")
 
 	// RP-initiated logout closes the session and revokes the access tokens
 	logout := url.Values{"id_token_hint": {tk.IDToken}, "post_logout_redirect_uri": {postLogoutURI}, "state": {"bye"}}
-	resp, body = get(t, c, s.url("/logout?"+logout.Encode()))
+	resp, body = get(t, c, s.url("/connect/endsession?"+logout.Encode()))
 	expectStatus(t, resp, body, http.StatusFound)
 	if resp.Header.Get("Location") != postLogoutURI+"?state=bye" {
 		t.Errorf("Unexpected logout redirect: %s", resp.Header.Get("Location"))
@@ -410,7 +416,7 @@ func TestAuthorizationCodeFlowWithSQLite(t *testing.T) {
 	code := s.authorize(t, c, authorizePath(clientID, nil))
 	tk := s.exchangeCode(t, code)
 
-	resp, body := postForm(t, http.DefaultClient, s.url("/token"), url.Values{
+	resp, body := postForm(t, http.DefaultClient, s.url("/connect/token"), url.Values{
 		"grant_type": {"authorization_code"}, "code": {code}, "redirect_uri": {redirectURI}, "code_verifier": {codeVerifier},
 	}, basicAuth(clientID, clientSecret))
 	expectError(t, resp, body, http.StatusBadRequest, "invalid_grant")
@@ -432,7 +438,7 @@ func TestAuthorizationCodeFlowWithSQLite(t *testing.T) {
 	resp, body = s.refresh(http.DefaultClient, t, refreshed.RefreshToken)
 	expectError(t, resp, body, http.StatusBadRequest, "invalid_grant")
 
-	resp, body = get(t, c, s.url("/logout?"+url.Values{"id_token_hint": {tk.IDToken}}.Encode()))
+	resp, body = get(t, c, s.url("/connect/endsession?"+url.Values{"id_token_hint": {tk.IDToken}}.Encode()))
 	expectStatus(t, resp, body, http.StatusOK)
 	resp, body = s.userinfo(t, tk.AccessToken)
 	expectError(t, resp, body, http.StatusUnauthorized, "invalid_token")
@@ -444,13 +450,13 @@ func TestLogoutRejectsUnregisteredRedirect(t *testing.T) {
 	tk := s.exchangeCode(t, s.authorize(t, c, authorizePath(clientID, nil)))
 
 	logout := url.Values{"id_token_hint": {tk.IDToken}, "post_logout_redirect_uri": {"https://evil.test"}}
-	resp, body := get(t, c, s.url("/logout?"+logout.Encode()))
+	resp, body := get(t, c, s.url("/connect/endsession?"+logout.Encode()))
 	expectError(t, resp, body, http.StatusBadRequest, "invalid_request")
 
 	// without id_token_hint the user must confirm
-	resp, body = get(t, c, s.url("/logout"))
+	resp, body = get(t, c, s.url("/connect/endsession"))
 	expectStatus(t, resp, body, http.StatusOK)
-	if !strings.Contains(body, "Do you want to log out?") {
+	if !strings.Contains(body, "Do you want to sign out?") {
 		t.Errorf("Expected logout confirmation: %s", body)
 	}
 }
@@ -463,7 +469,8 @@ func expectAuthorizeError(t *testing.T, resp *http.Response, oauthError string) 
 		t.Fatalf("Expected redirect to the client, got %d %s", resp.StatusCode, resp.Header.Get("Location"))
 	}
 
-	if location.Query().Get("error") != oauthError || location.Query().Get("state") != "state-123" || location.Query().Get("code") != "" {
+	params := responseParams(location)
+	if params.Get("error") != oauthError || params.Get("state") != "state-123" || params.Get("code") != "" {
 		t.Fatalf("Expected error %s with state, got %s", oauthError, location)
 	}
 }
@@ -519,7 +526,7 @@ func TestTokenRequiresTheAuthorizationRedirectURI(t *testing.T) {
 	code := s.authorize(t, browser(t), authorizePath(clientID, url.Values{"redirect_uri": {redirectURI2}}))
 
 	// redirectURI is registered, but it is not the one of the authorization request
-	resp, body := postForm(t, http.DefaultClient, s.url("/token"), url.Values{
+	resp, body := postForm(t, http.DefaultClient, s.url("/connect/token"), url.Values{
 		"grant_type": {"authorization_code"}, "code": {code}, "redirect_uri": {redirectURI}, "code_verifier": {codeVerifier},
 	}, basicAuth(clientID, clientSecret))
 	expectError(t, resp, body, http.StatusBadRequest, "invalid_grant")
@@ -530,14 +537,14 @@ func TestTokenRequiresClientAuthentication(t *testing.T) {
 	code := s.authorize(t, browser(t), authorizePath(clientID, nil))
 	form := url.Values{"grant_type": {"authorization_code"}, "code": {code}, "redirect_uri": {redirectURI}, "code_verifier": {codeVerifier}}
 
-	resp, body := postForm(t, http.DefaultClient, s.url("/token"), form, basicAuth(clientID, "wrong"))
+	resp, body := postForm(t, http.DefaultClient, s.url("/connect/token"), form, basicAuth(clientID, "wrong"))
 	expectError(t, resp, body, http.StatusUnauthorized, "invalid_client")
 
-	resp, body = postForm(t, http.DefaultClient, s.url("/token"), form)
+	resp, body = postForm(t, http.DefaultClient, s.url("/connect/token"), form)
 	expectError(t, resp, body, http.StatusUnauthorized, "invalid_client")
 
 	// a code issued to a client cannot be used by another client
-	resp, body = postForm(t, http.DefaultClient, s.url("/token"), form, basicAuth(otherClientID, clientSecret))
+	resp, body = postForm(t, http.DefaultClient, s.url("/connect/token"), form, basicAuth(otherClientID, clientSecret))
 	expectError(t, resp, body, http.StatusBadRequest, "invalid_grant")
 }
 
@@ -562,17 +569,17 @@ func TestPublicClientRequiresPKCE(t *testing.T) {
 		wrong[k] = v
 	}
 	wrong.Set("code_verifier", strings.Repeat("a", 43))
-	resp, body = postForm(t, http.DefaultClient, s.url("/token"), wrong)
+	resp, body = postForm(t, http.DefaultClient, s.url("/connect/token"), wrong)
 	expectError(t, resp, body, http.StatusBadRequest, "invalid_grant")
 
 	// the failed attempt consumed the code
 	form.Set("code_verifier", codeVerifier)
-	resp, body = postForm(t, http.DefaultClient, s.url("/token"), form)
+	resp, body = postForm(t, http.DefaultClient, s.url("/connect/token"), form)
 	expectError(t, resp, body, http.StatusBadRequest, "invalid_grant")
 
 	code = s.authorize(t, c, authorizePath(publicClientID, nil))
 	form.Set("code", code)
-	resp, body = postForm(t, http.DefaultClient, s.url("/token"), form)
+	resp, body = postForm(t, http.DefaultClient, s.url("/connect/token"), form)
 	expectStatus(t, resp, body, http.StatusOK)
 }
 
@@ -581,7 +588,7 @@ func TestExpiredCode(t *testing.T) {
 	code := s.authorize(t, browser(t), authorizePath(clientID, nil))
 
 	s.clock.Advance(6 * time.Minute)
-	resp, body := postForm(t, http.DefaultClient, s.url("/token"), url.Values{
+	resp, body := postForm(t, http.DefaultClient, s.url("/connect/token"), url.Values{
 		"grant_type": {"authorization_code"}, "code": {code}, "redirect_uri": {redirectURI}, "code_verifier": {codeVerifier},
 	}, basicAuth(clientID, clientSecret))
 	expectError(t, resp, body, http.StatusBadRequest, "invalid_grant")
@@ -696,7 +703,7 @@ func TestDiscoveryAndHealth(t *testing.T) {
 
 	resp, body := get(t, http.DefaultClient, s.url("/.well-known/openid-configuration"))
 	expectStatus(t, resp, body, http.StatusOK)
-	for _, expected := range []string{`"end_session_endpoint":"http://issuer.test/logout"`, `"revocation_endpoint":"http://issuer.test/revoke"`, `"code_challenge_methods_supported":["S256"]`} {
+	for _, expected := range []string{`"end_session_endpoint":"http://issuer.test/connect/endsession"`, `"revocation_endpoint":"http://issuer.test/connect/revoke"`, `"code_challenge_methods_supported":["S256"]`} {
 		if !strings.Contains(body, expected) {
 			t.Errorf("Expected %s in discovery: %s", expected, body)
 		}

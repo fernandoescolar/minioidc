@@ -23,6 +23,7 @@ const createSqlite string = `
 	grantType TEXT NOT NULL,
 	clientID TEXT NOT NULL,
 	sessionID TEXT NOT NULL,
+	issuedAt DATETIME,
 	expiresAt DATETIME NOT NULL,
 	scopes TEXT NOT NULL,
 	nonce TEXT,
@@ -53,7 +54,21 @@ const createSqlite string = `
 	postLogoutRedirectURIs TEXT NOT NULL DEFAULT '[]',
 	authMethod TEXT NOT NULL DEFAULT '',
 	jwksURI TEXT NOT NULL DEFAULT '',
-	publicKeys TEXT NOT NULL DEFAULT '[]'
+	publicKeys TEXT NOT NULL DEFAULT '[]',
+	grantTypes TEXT NOT NULL DEFAULT '[]'
+  );
+  CREATE TABLE IF NOT EXISTS device_codes (
+	deviceCodeHash TEXT PRIMARY KEY,
+	userCode TEXT NOT NULL UNIQUE,
+	clientID TEXT NOT NULL,
+	scopes TEXT NOT NULL DEFAULT '[]',
+	expiresAt INTEGER NOT NULL,
+	interval INTEGER NOT NULL,
+	lastPolled INTEGER NOT NULL DEFAULT 0,
+	status TEXT NOT NULL,
+	userID TEXT NOT NULL DEFAULT '',
+	authTime INTEGER NOT NULL DEFAULT 0,
+	mfaVerified INTEGER NOT NULL DEFAULT 0
   );
   CREATE TABLE IF NOT EXISTS client_assertions (
 	id TEXT PRIMARY KEY,
@@ -68,10 +83,11 @@ const createSqlite string = `
 
 func NewSqliteDB(filepath string) (*sql.DB, error) {
 	if _, err := os.Stat(filepath); err != nil {
-		_, err := os.Create(filepath)
+		file, err := os.Create(filepath)
 		if err != nil {
 			return nil, fmt.Errorf("NewSqliteDB: %w", err)
 		}
+		file.Close()
 	}
 
 	// the pragmas are in the DSN, so they apply to every connection: WAL lets
@@ -108,10 +124,15 @@ func migrate(database *sql.DB) error {
 		return err
 	}
 
-	for column, columnType := range map[string]string{"redirectURI": "TEXT", "familyID": "TEXT", "used": "INTEGER DEFAULT 0"} {
+	// issuedAt also exists (NOT NULL) in the databases created by other versions
+	for column, columnType := range map[string]string{"redirectURI": "TEXT", "familyID": "TEXT", "used": "INTEGER DEFAULT 0", "issuedAt": "DATETIME"} {
 		if err := addColumn(database, "grants", column, columnType); err != nil {
 			return err
 		}
+	}
+
+	if err := addColumn(database, "clients", "grantTypes", "TEXT NOT NULL DEFAULT '[]'"); err != nil {
+		return err
 	}
 
 	_, err := database.Exec("CREATE INDEX IF NOT EXISTS grants_familyID ON grants(familyID);")

@@ -1,19 +1,27 @@
-{{define "content"}}
-<form class="form" method="post">
-    <p class="error">
-        {{ if .InvalidLogin }}
-        ⚠️ Invalid login
-        {{ end }}
-        {{ if .TooManyAttempts }}
-        ⛔ Too many failed attempts. Try it again later.
-        {{ end }}
-        {{ if .UnknownError }}
-        ☢️ Error. Try it again later or contact the administrator.
-        {{ end }}
-    </p>
-    <input name="username" type="text" placeholder="Username" value="{{ .Username }}" />
-    <input name="password" type="password" placeholder="Password" />
-    <input type="hidden" name="__csrf" value="{{ .CSRF }}">
-    <button type="submit">Login</button>
-</form>
-{{end}}
+{{ define "title" }}Sign in · {{ .Name }}{{ end }}
+{{ define "content" }}
+<div class="stack">
+    <div>
+        <h1 class="page-title">Sign in</h1>
+        <p class="page-subtitle">Use your {{ .Name }} account</p>
+    </div>
+
+    {{ if .InvalidLogin }}<div class="alert-error" role="alert">Invalid login: check your username and password.</div>{{ end }}
+    {{ if .TooManyAttempts }}<div class="alert-error" role="alert">Too many failed attempts. Try it again later.</div>{{ end }}
+    {{ if .FormExpired }}<div class="alert-warning" role="alert">The form has expired. Please try again.</div>{{ end }}
+    {{ if .UnknownError }}<div class="alert-error" role="alert">Something went wrong. Try it again later or contact the administrator.</div>{{ end }}
+
+    <form class="stack" method="post">
+        <div>
+            <label class="label" for="username">Username</label>
+            <input class="input" id="username" name="username" type="text" value="{{ .Username }}" autocomplete="username" autocapitalize="none" spellcheck="false" required {{ if not .Username }}autofocus{{ end }}>
+        </div>
+        <div>
+            <label class="label" for="password">Password</label>
+            <input class="input" id="password" name="password" type="password" autocomplete="current-password" required {{ if .Username }}autofocus{{ end }}>
+        </div>
+        <input type="hidden" name="__csrf" value="{{ .CSRF }}">
+        <button class="btn-primary btn-block" type="submit">Sign in</button>
+    </form>
+</div>
+{{ end }}

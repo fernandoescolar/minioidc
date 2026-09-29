@@ -31,6 +31,7 @@ type mfaCreateModel struct {
 	InvalidVerificationCode bool
 	TooManyAttempts         bool
 	UnknownError            bool
+	FormExpired             bool
 	CSRF                    string
 }
 
@@ -94,7 +95,7 @@ func (h *MFACreateHandler) getHTTP(w http.ResponseWriter, r *http.Request, sessi
 
 func (h *MFACreateHandler) postHTTP(w http.ResponseWriter, r *http.Request, session domain.Session) {
 	if !utils.GetCSRFValid(r) {
-		http.Error(w, "Bad Request", http.StatusBadRequest)
+		h.render(w, r, session, mfaCreateModel{IV: r.PostFormValue("verification_iv"), FormExpired: true})
 		return
 	}
 

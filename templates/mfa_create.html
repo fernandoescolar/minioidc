@@ -1,42 +1,38 @@
-{{define "content"}}
-<form class="form" method="post">
-    <p>Scan this QR using your favorite auth app:</p>
-    <div id="qrcode"></div>
-    <p class="error">
-        {{ if .InvalidVerificationCode }}
-        ⚠️ Invalid verification code
-        {{ end }}
-        {{ if .TooManyAttempts }}
-        ⛔ Too many failed attempts. Try it again later.
-        {{ end }}
-        {{ if .UnknownError }}
-        ☢️ Error. Try it again later or contact the administrator.
-        {{ end }}
-    </p>
-    <p>Verify the code your auth app is showing:</p>
-    <div class="otp-wrapper">
-        <input
-            type="text"
-            autocomplete="one-time-code"
-            inputmode="numeric"
-            maxlength="6"   
-            pattern="\d{6}"
-            name="verification_code" />
-
-        <button id="verify" type="submit">Verify</button>
+{{ define "title" }}Set up two-step verification · {{ .Name }}{{ end }}
+{{ define "content" }}
+<div class="stack">
+    <div>
+        <h1 class="page-title">Set up two-step verification</h1>
+        <p class="page-subtitle">Protect your account with an authenticator app, like Google Authenticator, Authy or 1Password.</p>
     </div>
-    <input type="hidden" name="verification_iv" value="{{.IV}}" />
-    <input type="hidden" name="__csrf" value="{{ .CSRF }}">
-</form>
+
+    {{ if .InvalidVerificationCode }}<div class="alert-error" role="alert">Invalid verification code. Check that the time of your phone is right and try it again.</div>{{ end }}
+    {{ if .TooManyAttempts }}<div class="alert-error" role="alert">Too many failed attempts. Try it again later.</div>{{ end }}
+    {{ if .FormExpired }}<div class="alert-warning" role="alert">The form has expired. Please try again.</div>{{ end }}
+    {{ if .UnknownError }}<div class="alert-error" role="alert">Something went wrong. Try it again later or contact the administrator.</div>{{ end }}
+
+    <ol class="stack">
+        <li class="stack">
+            <p class="text-sm font-medium">1. Scan this QR code with your authenticator app</p>
+            <div class="qr" id="qrcode" data-qr="{{ .QRCode }}"></div>
+            <details class="text-sm">
+                <summary class="link cursor-pointer">Can't scan it? Enter the key</summary>
+                <p class="secret mt-2">{{ .IV }}</p>
+            </details>
+        </li>
+        <li>
+            <form class="stack" method="post">
+                <div>
+                    <label class="label" for="verification_code">2. Enter the 6-digit code of the app</label>
+                    <input class="code-input" id="verification_code" name="verification_code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="\d{6}" placeholder="000000" required>
+                </div>
+                <input type="hidden" name="verification_iv" value="{{ .IV }}">
+                <input type="hidden" name="__csrf" value="{{ .CSRF }}">
+                <button class="btn-primary btn-block" id="verify" type="submit">Verify and turn on</button>
+            </form>
+        </li>
+    </ol>
+</div>
 <script src="{{ basePath }}/static/qrcode.min.js"></script>
-<script>
-    new QRCode(document.getElementById("qrcode"), {
-        text: "{{.QRCode}}",
-        width: 256,
-        height: 256,
-        colorDark: "#000000",
-        colorLight: "#ffffff",
-        correctLevel: QRCode.CorrectLevel.H
-    });
-</script>
-{{end}}
+<script defer src="{{ basePath }}/static/qrcode.gen.js"></script>
+{{ end }}

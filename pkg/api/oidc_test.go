@@ -3,6 +3,7 @@ package api_test
 import (
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -20,7 +21,20 @@ func callbackParams(t *testing.T, resp *http.Response) url.Values {
 		t.Fatalf("Expected redirect to the client, got %d %s", resp.StatusCode, resp.Header.Get("Location"))
 	}
 
-	return location.Query()
+	return responseParams(location)
+}
+
+// responseParams returns the parameters of an authorization response, in the
+// query or in the fragment (implicit and hybrid flows)
+func responseParams(location *url.URL) url.Values {
+	params := location.Query()
+	if fragment, err := url.ParseQuery(location.Fragment); err == nil {
+		for key, values := range fragment {
+			params[key] = values
+		}
+	}
+
+	return params
 }
 
 func expectCallbackError(t *testing.T, resp *http.Response, oauthError string) {
@@ -171,7 +185,7 @@ func TestUnsupportedAuthorizationParameters(t *testing.T) {
 	resp, _ = get(t, c, s.url(authorizePath(clientID, url.Values{"request_uri": {"https://client.test/request.jwt"}})))
 	expectCallbackError(t, resp, "request_uri_not_supported")
 
-	resp, _ = get(t, c, s.url(authorizePath(clientID, url.Values{"response_mode": {"fragment"}})))
+	resp, _ = get(t, c, s.url(authorizePath(clientID, url.Values{"response_mode": {"form_post"}})))
 	expectCallbackError(t, resp, "invalid_request")
 
 	// optional parameters are accepted and ignored
@@ -192,7 +206,7 @@ func TestAuthorizationRequestWithoutStateOrNonce(t *testing.T) {
 	params := u.Query()
 	params.Del("state")
 	params.Del("nonce")
-	resp, _ := get(t, c, s.url("/authorize?"+params.Encode()))
+	resp, _ := get(t, c, s.url("/connect/authorize?"+params.Encode()))
 	callback := callbackParams(t, resp)
 	if callback.Get("code") == "" || callback.Has("state") {
 		t.Fatalf("Expected a code without state: %v", callback)
@@ -205,7 +219,7 @@ func TestAuthorizationWithPOST(t *testing.T) {
 	s.authorize(t, c, authorizePath(clientID, nil)) // login
 
 	u, _ := url.Parse(authorizePath(clientID, nil))
-	resp, _ := postForm(t, c, s.url("/authorize"), u.Query())
+	resp, _ := postForm(t, c, s.url("/connect/authorize"), u.Query())
 	if callbackParams(t, resp).Get("code") == "" {
 		t.Fatal("Expected a code with a POST request")
 	}
@@ -223,7 +237,7 @@ func TestLoginHint(t *testing.T) {
 
 	resp, body := get(t, c, s.URL+login.RequestURI())
 	expectStatus(t, resp, body, http.StatusOK)
-	if !strings.Contains(body, `name="username" type="text" placeholder="Username" value="user"`) {
+	if !regexp.MustCompile(`name="username"[^>]*value="user"`).MatchString(body) {
 		t.Errorf("Expected the username to be prefilled: %s", body)
 	}
 }
@@ -232,11 +246,11 @@ func TestUserinfoWithTokenInTheBody(t *testing.T) {
 	s := newTestServer(t, false)
 	tk := s.exchangeCode(t, s.authorize(t, browser(t), authorizePath(clientID, nil)))
 
-	resp, body := postForm(t, http.DefaultClient, s.url("/userinfo"), url.Values{"access_token": {tk.AccessToken}})
+	resp, body := postForm(t, http.DefaultClient, s.url("/connect/userinfo"), url.Values{"access_token": {tk.AccessToken}})
 	expectStatus(t, resp, body, http.StatusOK)
 
 	// only one method can be used
-	resp, body = postForm(t, http.DefaultClient, s.url("/userinfo"), url.Values{"access_token": {tk.AccessToken}}, func(r *http.Request) {
+	resp, body = postForm(t, http.DefaultClient, s.url("/connect/userinfo"), url.Values{"access_token": {tk.AccessToken}}, func(r *http.Request) {
 		r.Header.Set("Authorization", "Bearer "+tk.AccessToken)
 	})
 	expectError(t, resp, body, http.StatusUnauthorized, "invalid_request")
@@ -263,7 +277,7 @@ func TestStandardClaims(t *testing.T) {
 func TestCORS(t *testing.T) {
 	s := newTestServer(t, false)
 
-	req, _ := http.NewRequest(http.MethodOptions, s.url("/token"), nil)
+	req, _ := http.NewRequest(http.MethodOptions, s.url("/connect/token"), nil)
 	req.Header.Set("Origin", "https://spa.test")
 	req.Header.Set("Access-Control-Request-Method", "POST")
 	resp, body := do(t, http.DefaultClient, req)
@@ -297,7 +311,7 @@ func TestIssuerWithPath(t *testing.T) {
 
 	resp, body := get(t, http.DefaultClient, s.url("/.well-known/openid-configuration"))
 	expectStatus(t, resp, body, http.StatusOK)
-	for _, expected := range []string{`"issuer":"http://issuer.test/auth"`, `"authorization_endpoint":"http://issuer.test/auth/authorize"`, `"jwks_uri":"http://issuer.test/auth/.well-known/jwks.json"`} {
+	for _, expected := range []string{`"issuer":"http://issuer.test/auth"`, `"authorization_endpoint":"http://issuer.test/auth/connect/authorize"`, `"jwks_uri":"http://issuer.test/auth/.well-known/jwks.json"`} {
 		if !strings.Contains(body, expected) {
 			t.Errorf("Expected %s in discovery: %s", expected, body)
 		}
@@ -326,5 +340,41 @@ func TestInvalidIssuer(t *testing.T) {
 		if _, err := b.Build(); err == nil {
 			t.Errorf("Expected %s to be an invalid issuer", value)
 		}
+	}
+}
+
+// the discouraged flows are disabled by default, and the clients can only use
+// the grant types they list (by default authorization_code and refresh_token)
+func TestDiscouragedFlowsAreDisabledByDefault(t *testing.T) {
+	s := newTestServer(t, false)
+	c := browser(t)
+	s.authorize(t, c, authorizePath(clientID, nil)) // login
+
+	resp, _ := get(t, c, s.url(authorizePath(clientID, url.Values{"response_type": {"id_token token"}})))
+	expectCallbackErrorIn(t, resp, "unsupported_response_type")
+
+	resp, body := postForm(t, http.DefaultClient, s.url("/connect/token"), url.Values{
+		"grant_type": {"password"}, "username": {username}, "password": {password},
+	}, basicAuth(clientID, clientSecret))
+	expectError(t, resp, body, http.StatusBadRequest, "unsupported_grant_type")
+
+	resp, body = postForm(t, http.DefaultClient, s.url("/connect/token"), url.Values{"grant_type": {"client_credentials"}}, basicAuth(clientID, clientSecret))
+	expectError(t, resp, body, http.StatusBadRequest, "unauthorized_client")
+
+	resp, body = get(t, http.DefaultClient, s.url("/.well-known/openid-configuration"))
+	expectStatus(t, resp, body, http.StatusOK)
+	for _, unexpected := range []string{`"password"`, `"implicit"`, `"id_token token"`, `"fragment"`} {
+		if strings.Contains(body, unexpected) {
+			t.Errorf("Expected %s not to be advertised: %s", unexpected, body)
+		}
+	}
+}
+
+// expectCallbackErrorIn checks an error redirected to the client in the query or in the fragment
+func expectCallbackErrorIn(t *testing.T, resp *http.Response, oauthError string) {
+	t.Helper()
+	location, err := url.Parse(resp.Header.Get("Location"))
+	if resp.StatusCode != http.StatusFound || err != nil || responseParams(location).Get("error") != oauthError {
+		t.Fatalf("Expected error %s in the callback, got %d %s", oauthError, resp.StatusCode, resp.Header.Get("Location"))
 	}
 }

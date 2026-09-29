@@ -6,9 +6,11 @@ import (
 	"github.com/fernandoescolar/minioidc/pkg/domain"
 )
 
+// There are no inline scripts (the QR codes read their data from an attribute),
+// so script-src does not allow 'unsafe-inline'.
 // form-action is not set on purpose: Chrome applies it to the redirects that
 // follow a form submission (login -> authorize -> client redirect_uri).
-const contentSecurityPolicy = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; media-src 'self'; object-src 'none'; frame-src 'none'; frame-ancestors 'none'; base-uri 'self'"
+const contentSecurityPolicy = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; media-src 'self'; object-src 'none'; frame-src 'none'; frame-ancestors 'none'; base-uri 'self'"
 
 type CSP struct {
 	active bool

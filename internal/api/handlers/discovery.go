@@ -11,12 +11,21 @@ import (
 )
 
 var (
+	// GrantTypesSupported are the grant types that are always available
+	// (the clients must be allowed to use them)
 	GrantTypesSupported = []string{
-		"authorization_code",
-		"refresh_token",
+		domain.GrantTypeAuthorizationCode,
+		domain.GrantTypeRefreshToken,
+		domain.GrantTypeClientCredentials,
+		domain.GrantTypeDeviceCode,
+		domain.GrantTypeJWTBearer,
 	}
 	ResponseTypesSupported = []string{
 		"code",
+	}
+	// ImplicitResponseTypesSupported are the response types of the implicit and hybrid flows
+	ImplicitResponseTypesSupported = []string{
+		"id_token", "id_token token", "code id_token", "code token", "code id_token token",
 	}
 	SubjectTypesSupported = []string{
 		"public",
@@ -79,6 +88,11 @@ var (
 )
 
 type DiscoveryHandler struct {
+	grantTypes     []string
+	responseTypes  []string
+	responseModes  []string
+	deviceEndpoint string
+
 	issuer                string
 	authorizationEndpoint string
 	tokenEndpoint         string
@@ -98,6 +112,7 @@ type discoveryResponse struct {
 	EndSessionEndpoint    string `json:"end_session_endpoint"`
 	RevocationEndpoint    string `json:"revocation_endpoint"`
 	IntrospectionEndpoint string `json:"introspection_endpoint"`
+	DeviceEndpoint        string `json:"device_authorization_endpoint"`
 
 	GrantTypesSupported               []string `json:"grant_types_supported"`
 	ResponseTypesSupported            []string `json:"response_types_supported"`
@@ -134,10 +149,33 @@ type DiscoveryEndpoints struct {
 	EndSession    string
 	Revocation    string
 	Introspection string
+	Device        string
 }
 
-func NewDiscoveryHandler(issuer string, endpoints DiscoveryEndpoints) *DiscoveryHandler {
+// DiscoveryOptions are the optional features published in the discovery document
+type DiscoveryOptions struct {
+	AllowImplicitFlow  bool
+	AllowPasswordGrant bool
+}
+
+func NewDiscoveryHandler(issuer string, endpoints DiscoveryEndpoints, options DiscoveryOptions) *DiscoveryHandler {
+	grantTypes := append([]string{}, GrantTypesSupported...)
+	responseTypes := append([]string{}, ResponseTypesSupported...)
+	responseModes := append([]string{}, ResponseModesSupported...)
+	if options.AllowImplicitFlow {
+		grantTypes = append(grantTypes, domain.GrantTypeImplicit)
+		responseTypes = append(responseTypes, ImplicitResponseTypesSupported...)
+		responseModes = append(responseModes, "fragment")
+	}
+	if options.AllowPasswordGrant {
+		grantTypes = append(grantTypes, domain.GrantTypePassword)
+	}
+
 	return &DiscoveryHandler{
+		grantTypes:            grantTypes,
+		responseTypes:         responseTypes,
+		responseModes:         responseModes,
+		deviceEndpoint:        endpoints.Device,
 		issuer:                issuer,
 		authorizationEndpoint: endpoints.Authorization,
 		tokenEndpoint:         endpoints.Token,
@@ -161,9 +199,10 @@ func (h *DiscoveryHandler) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 		EndSessionEndpoint:    h.issuerWithoutTrailingSlash() + h.endSessionEndpoint,
 		RevocationEndpoint:    h.issuerWithoutTrailingSlash() + h.revocationEndpoint,
 		IntrospectionEndpoint: h.issuerWithoutTrailingSlash() + h.introspectionEndpoint,
+		DeviceEndpoint:        h.issuerWithoutTrailingSlash() + h.deviceEndpoint,
 
-		GrantTypesSupported:               GrantTypesSupported,
-		ResponseTypesSupported:            ResponseTypesSupported,
+		GrantTypesSupported:               h.grantTypes,
+		ResponseTypesSupported:            h.responseTypes,
 		SubjectTypesSupported:             SubjectTypesSupported,
 		IDTokenSigningAlgValuesSupported:  IDTokenSigningAlgValuesSupported,
 		ScopesSupported:                   ScopesSupported,
@@ -176,7 +215,7 @@ func (h *DiscoveryHandler) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 		TokenEndpointAuthSigningAlgs:         TokenEndpointAuthSigningAlgValuesSupported,
 		RevocationEndpointAuthSigningAlgs:    TokenEndpointAuthSigningAlgValuesSupported,
 		IntrospectionEndpointAuthSigningAlgs: TokenEndpointAuthSigningAlgValuesSupported,
-		ResponseModesSupported:               ResponseModesSupported,
+		ResponseModesSupported:               h.responseModes,
 		PromptValuesSupported:                []string{promptNone, promptLogin, promptConsent, promptSelectAccount},
 		AuthorizationResponseIssSupported:    true,
 	}

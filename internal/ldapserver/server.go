@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/fernandoescolar/minioidc/internal/credentials"
 	"github.com/fernandoescolar/minioidc/pkg/cryptography"
 	"github.com/fernandoescolar/minioidc/pkg/domain"
 	"github.com/go-ldap/ldap/v3"
@@ -25,24 +26,20 @@ import (
 )
 
 const (
-	totpLength   = 6
 	startTimeout = 5 * time.Second
 	ioTimeout    = 30 * time.Second
 )
 
 // Server is the LDAP server
 type Server struct {
-	config     domain.LDAPServerConfig
-	baseDN     *ldap.DN
-	usersDN    *ldap.DN
-	serviceDN  *ldap.DN
-	now        func() time.Time
-	users      domain.UserStore
-	lister     domain.UserLister
-	mfaStore   domain.MFACodeStore
-	blocked    domain.UserBlockedStore
-	requireMFA bool
-	tlsConfig  *tls.Config
+	config      domain.LDAPServerConfig
+	baseDN      *ldap.DN
+	usersDN     *ldap.DN
+	serviceDN   *ldap.DN
+	now         func() time.Time
+	lister      domain.UserLister
+	credentials *credentials.Checker
+	tlsConfig   *tls.Config
 
 	mu          sync.Mutex
 	connections map[int]*connection
@@ -76,15 +73,17 @@ func New(config *domain.Config, now func() time.Time) (*Server, error) {
 
 	usersDN, _ := ldap.ParseDN("ou=users," + cfg.BaseDN)
 	s := &Server{
-		config:      *cfg,
-		baseDN:      baseDN,
-		usersDN:     usersDN,
-		now:         now,
-		users:       config.UserStore,
-		lister:      lister,
-		mfaStore:    config.MFACodeStore,
-		blocked:     config.UserBlockedStore,
-		requireMFA:  config.RequireMFA,
+		config:  *cfg,
+		baseDN:  baseDN,
+		usersDN: usersDN,
+		now:     now,
+		lister:  lister,
+		credentials: &credentials.Checker{
+			Users:      config.UserStore,
+			MFA:        config.MFACodeStore,
+			Blocked:    config.UserBlockedStore,
+			RequireMFA: config.RequireMFA,
+		},
 		connections: map[int]*connection{},
 	}
 
@@ -302,51 +301,8 @@ func (s *Server) username(name string) (string, bool) {
 // authenticate checks the password (and the TOTP code at its end, when the
 // user has MFA) with the same brute force protection of the login page
 func (s *Server) authenticate(username, password string) bool {
-	now := s.now()
-	key := "login:" + strings.ToLower(username)
-	if s.blocked.IsBlocked(key, now) {
-		return false
-	}
-
-	if s.checkCredentials(username, password, now) {
-		s.blocked.Reset(key)
-		return true
-	}
-
-	s.blocked.AddFailedAttempt(key, now)
-	return false
-}
-
-func (s *Server) checkCredentials(username, password string, now time.Time) bool {
-	// the password alone: only valid when the user does not need MFA
-	if user, err := s.users.GetUserByUsernameAndPassword(username, password); err == nil {
-		hasMFA, err := s.mfaStore.UserHasMFACodes(user.ID())
-		return err == nil && !hasMFA && !s.requireMFA
-	}
-
-	// the password followed by the TOTP code
-	if len(password) <= totpLength {
-		return false
-	}
-
-	code := password[len(password)-totpLength:]
-	user, err := s.users.GetUserByUsernameAndPassword(username, password[:len(password)-totpLength])
-	if err != nil {
-		return false
-	}
-
-	codes, err := s.mfaStore.GetMFACodeByUserID(user.ID())
-	if err != nil {
-		return false
-	}
-
-	for _, mfa := range codes {
-		if cryptography.VerifyTOTP(mfa.Method(), mfa.Secret(), code, now) {
-			return true
-		}
-	}
-
-	return false
+	_, _, err := s.credentials.Authenticate(username, password, s.now())
+	return err == nil
 }
 
 // ---------- Search ----------

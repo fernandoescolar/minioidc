@@ -100,7 +100,7 @@ func TestAdminRequiresAnAdministrator(t *testing.T) {
 	admin := s.loginAs(t, username)
 	resp, body = get(t, admin.http, s.url("/admin/"))
 	expectStatus(t, resp, body, http.StatusOK)
-	if !strings.Contains(body, "minioidc") {
+	if !strings.Contains(body, `id="root"`) && !strings.Contains(body, "has not been built") {
 		t.Errorf("Expected the admin web: %s", body)
 	}
 
@@ -226,7 +226,7 @@ func TestAdminManagesClients(t *testing.T) {
 	}
 
 	introspect := func(id, secret string) int {
-		resp, _ := postForm(t, http.DefaultClient, s.url("/introspect"), url.Values{"token": {"x"}}, basicAuth(id, secret))
+		resp, _ := postForm(t, http.DefaultClient, s.url("/connect/introspect"), url.Values{"token": {"x"}}, basicAuth(id, secret))
 		return resp.StatusCode
 	}
 	if introspect("web", secret) != http.StatusOK {

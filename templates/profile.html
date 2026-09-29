@@ -1,0 +1,32 @@
+{{ define "title" }}Your account · {{ .Name }}{{ end }}
+{{ define "content" }}
+<div class="stack">
+    <div>
+        <h1 class="page-title">{{ if .DisplayName }}{{ .DisplayName }}{{ else }}Your account{{ end }}</h1>
+        <p class="page-subtitle">Signed in as <strong>{{ .Username }}</strong>{{ if .Email }} · {{ .Email }}{{ end }}</p>
+    </div>
+
+    <nav class="menu" aria-label="Account">
+        {{ if .CanChangePassword }}
+        <a class="menu-item" href="{{ basePath }}/profile/password">
+            <span>Change password</span><span aria-hidden="true">›</span>
+        </a>
+        {{ end }}
+        <a class="menu-item" href="{{ basePath }}/profile/mfa">
+            <span>Two-step verification</span>
+            <span class="flex items-center gap-2">
+                {{ if .HasMFA }}<span class="badge bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">On</span>{{ else }}<span class="badge bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300">Off</span>{{ end }}
+                <span aria-hidden="true">›</span>
+            </span>
+        </a>
+        {{ if .AdminURL }}
+        <a class="menu-item" href="{{ .AdminURL }}">
+            <span>Administration</span><span aria-hidden="true">›</span>
+        </a>
+        {{ end }}
+        <a class="menu-item" href="{{ basePath }}/connect/endsession">
+            <span>Sign out</span><span aria-hidden="true">›</span>
+        </a>
+    </nav>
+</div>
+{{ end }}

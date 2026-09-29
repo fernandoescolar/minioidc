@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
-import { api, authMethods, usesSecret, type AuthMethod, type Client } from '../api'
+import { api, authMethods, grantTypes, usesSecret, type AuthMethod, type Client, type Info } from '../api'
 import { Badge, EmptyState, Field, Modal, SecretDialog, Spinner, lines, useAction, useConfirm } from '../components/ui'
 
 const PEM = /-----BEGIN [^-]+-----[\s\S]*?-----END [^-]+-----/g
 
-export function ClientsPage() {
+export function ClientsPage({ info }: { info: Info }) {
   const [clients, setClients] = useState<Client[] | null>(null)
   const [filter, setFilter] = useState('')
   const [editing, setEditing] = useState<Client | 'new' | null>(null)
@@ -98,7 +98,7 @@ export function ClientsPage() {
             <thead className="border-b border-slate-200 text-xs text-slate-500 uppercase dark:border-slate-800 dark:text-slate-400">
               <tr>
                 <th className="px-4 py-2 font-medium">Client</th>
-                <th className="px-4 py-2 font-medium">Authentication</th>
+                <th className="hidden px-4 py-2 font-medium sm:table-cell">Authentication</th>
                 <th className="hidden px-4 py-2 font-medium xl:table-cell">Redirect URIs</th>
                 <th className="px-4 py-2" />
               </tr>
@@ -107,7 +107,7 @@ export function ClientsPage() {
               {visible.map((client) => (
                 <tr key={client.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
                   <td className="px-4 py-2.5 font-medium">{client.id}</td>
-                  <td className="px-4 py-2.5">
+                  <td className="hidden px-4 py-2.5 sm:table-cell">
                     <Badge color={client.token_endpoint_auth_method === 'none' ? 'amber' : 'gray'}>
                       {client.token_endpoint_auth_method || 'client_secret_basic/post'}
                     </Badge>
@@ -150,19 +150,32 @@ export function ClientsPage() {
         )}
       </div>
 
-      {editing && <ClientDialog client={editing === 'new' ? null : editing} onClose={() => setEditing(null)} onSaved={saved} />}
+      {editing && <ClientDialog client={editing === 'new' ? null : editing} info={info} onClose={() => setEditing(null)} onSaved={saved} />}
       {secret && <SecretDialog clientId={secret.clientId} secret={secret.secret} onClose={() => setSecret(null)} />}
     </section>
   )
 }
 
-function ClientDialog({ client, onClose, onSaved }: { client: Client | null; onClose: () => void; onSaved: (client: Client) => void }) {
+function ClientDialog({
+  client,
+  info,
+  onClose,
+  onSaved,
+}: {
+  client: Client | null
+  info: Info
+  onClose: () => void
+  onSaved: (client: Client) => void
+}) {
   const [id, setId] = useState(client?.id ?? '')
   const [method, setMethod] = useState<AuthMethod>(client?.token_endpoint_auth_method ?? 'client_secret_basic')
   const [redirectURIs, setRedirectURIs] = useState((client?.redirect_uris ?? []).join('\n'))
   const [postLogoutURIs, setPostLogoutURIs] = useState((client?.post_logout_redirect_uris ?? []).join('\n'))
   const [jwksURI, setJwksURI] = useState(client?.jwks_uri ?? '')
   const [publicKeys, setPublicKeys] = useState((client?.public_keys ?? []).join('\n'))
+  const [grants, setGrants] = useState<string[]>(client?.grant_types ?? ['authorization_code', 'refresh_token'])
+  const toggleGrant = (value: string) =>
+    setGrants((current) => (current.includes(value) ? current.filter((g) => g !== value) : [...current, value]))
   const [saving, setSaving] = useState(false)
   const run = useAction()
 
@@ -178,6 +191,7 @@ function ClientDialog({ client, onClose, onSaved }: { client: Client | null; onC
       post_logout_redirect_uris: lines(postLogoutURIs),
       jwks_uri: method === 'private_key_jwt' ? jwksURI.trim() : '',
       public_keys: method === 'private_key_jwt' ? (publicKeys.match(PEM) ?? []) : [],
+      grant_types: grants,
     }
     let result: Client | undefined
     const ok = await run(async () => {
@@ -229,6 +243,28 @@ function ClientDialog({ client, onClose, onSaved }: { client: Client | null; onC
               ))}
           </select>
         </Field>
+
+        <fieldset>
+          <legend className="label">Grant types</legend>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {grantTypes.map((g) => {
+              const disabled =
+                (g.discouraged === 'implicit' && !info.allow_implicit_flow) || (g.discouraged === 'password' && !info.allow_password_grant)
+              return (
+                <label key={g.value} className={`flex items-start gap-2 text-sm ${disabled ? 'opacity-60' : ''}`}>
+                  <input type="checkbox" className="mt-0.5" checked={grants.includes(g.value)} onChange={() => toggleGrant(g.value)} />
+                  <span>
+                    {g.label}
+                    <span className="block text-xs text-slate-500 dark:text-slate-400">
+                      {g.description}
+                      {disabled && ' — disabled in the configuration (grants section)'}
+                    </span>
+                  </span>
+                </label>
+              )
+            })}
+          </div>
+        </fieldset>
 
         <Field label="Redirect URIs" htmlFor="redirect-uris" hint="One per line. Leave it empty for resource servers that only introspect tokens.">
           <textarea

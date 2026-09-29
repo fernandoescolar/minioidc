@@ -20,10 +20,16 @@ test: fmt vet
 build: fmt vet
 	go build -o bin/minioidc ./cmd/minioidc
 
-# builds the admin web (web/admin) into internal/admin/ui/dist, embedded in the binary
+# builds the admin web (web/admin) into internal/admin/ui/dist, embedded in the
+# binary, and the stylesheet of the pages (static/styles.css)
 .PHONY: build-admin
 build-admin:
 	cd web/admin && npm ci && npm run build
+
+# builds only the stylesheet of the pages (after changing the templates)
+.PHONY: build-css
+build-css:
+	cd web/admin && npm run build:css
 
 .PHONY: build-all
 build-all: build-admin build

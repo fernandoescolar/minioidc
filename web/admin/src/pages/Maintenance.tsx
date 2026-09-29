@@ -10,9 +10,9 @@ export function MaintenancePage() {
 
   const logoutAll = async () => {
     const ok = await confirm({
-      title: 'Log out all the users',
-      message: 'All the sessions are closed, including yours. The users will have to log in again in every application.',
-      confirmLabel: 'Log out everyone',
+      title: 'Sign out all the users',
+      message: 'All the sessions are closed, including yours. The users will have to sign in again in every application.',
+      confirmLabel: 'Sign out everyone',
       danger: true,
     })
     if (ok && (await run(api.logoutAll))) {
@@ -24,7 +24,7 @@ export function MaintenancePage() {
     <section className="grid gap-4 md:grid-cols-2">
       <Task
         title="Purge expired data"
-        description="Deletes the expired sessions, codes, refresh tokens, login blocks and client assertions. It also runs every hour."
+        description="Deletes the expired sessions, codes, refresh tokens, device codes, login blocks and client assertions. It also runs every hour."
         action={
           <button type="button" className="btn-primary" onClick={purge}>
             Purge now
@@ -32,11 +32,11 @@ export function MaintenancePage() {
         }
       />
       <Task
-        title="Log out all the users"
+        title="Sign out all the users"
         description="Closes every session. The access tokens stop working immediately and the refresh tokens cannot be used any more."
         action={
           <button type="button" className="btn-danger" onClick={logoutAll}>
-            Log out everyone
+            Sign out everyone
           </button>
         }
       />

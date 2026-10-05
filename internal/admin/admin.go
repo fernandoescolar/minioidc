@@ -30,24 +30,35 @@ const adminUserKey contextKey = "admin_user"
 
 // Handler serves the admin web and API
 type Handler struct {
-	now           func() time.Time
-	masterKey     string
-	name          string
-	adminGroup    string
-	issuer        string
-	allowImplicit bool
-	allowPassword bool
-	sessionStore  domain.SessionStore
-	userStore     domain.UserStore
-	users         domain.UserAdminStore // nil when the users are read only (LDAP, YAML)
-	clients       domain.ClientAdminStore
-	grantStore    domain.GrantStore
-	mfaStore      domain.MFACodeStore
-	userBlocked   domain.UserBlockedStore
-	assertions    domain.ClientAssertionStore
-	ui            fs.FS
-	errors        *handlers.ErrorPage
-	mux           *http.ServeMux
+	now            func() time.Time
+	masterKey      string
+	name           string
+	adminGroup     string
+	issuer         string
+	allowImplicit  bool
+	allowPassword  bool
+	sessionStore   domain.SessionStore
+	userStore      domain.UserStore
+	users          domain.UserAdminStore // nil when the users are read only (LDAP, YAML)
+	clients        domain.ClientAdminStore
+	grantStore     domain.GrantStore
+	mfaStore       domain.MFACodeStore
+	passkeys       domain.PasskeyStore
+	passkeysOn     bool
+	states         domain.UserStateStore
+	resets         domain.PasswordResetStore
+	lister         domain.UserLister
+	events         *domain.Recorder
+	eventStore     domain.EventStore
+	groupStore     domain.GroupStore
+	config         *domain.Config
+	eventRetention time.Duration // nil when the users cannot be listed (LDAP)
+	resetURL       string
+	userBlocked    domain.UserBlockedStore
+	assertions     domain.ClientAssertionStore
+	ui             fs.FS
+	errors         *handlers.ErrorPage
+	mux            *http.ServeMux
 }
 
 var _ http.Handler = (*Handler)(nil)
@@ -60,25 +71,37 @@ func NewHandler(config *domain.Config, now func() time.Time) (*Handler, error) {
 	}
 
 	users, _ := config.UserStore.(domain.UserAdminStore)
+	lister, _ := config.UserStore.(domain.UserLister)
 	h := &Handler{
-		now:           now,
-		masterKey:     config.MasterKey,
-		name:          config.Name,
-		adminGroup:    config.AdminGroup,
-		issuer:        config.Issuer,
-		allowImplicit: config.AllowImplicitFlow,
-		allowPassword: config.AllowPasswordGrant,
-		sessionStore:  config.SessionStore,
-		userStore:     config.UserStore,
-		users:         users,
-		clients:       clients,
-		grantStore:    config.GrantStore,
-		mfaStore:      config.MFACodeStore,
-		userBlocked:   config.UserBlockedStore,
-		assertions:    config.ClientAssertionStore,
-		ui:            uiFS(),
-		errors:        handlers.NewErrorPage(config),
-		mux:           http.NewServeMux(),
+		now:            now,
+		masterKey:      config.MasterKey,
+		name:           config.Name,
+		adminGroup:     config.AdminGroup,
+		issuer:         config.Issuer,
+		allowImplicit:  config.AllowImplicitFlow,
+		allowPassword:  config.AllowPasswordGrant,
+		sessionStore:   config.SessionStore,
+		userStore:      config.UserStore,
+		users:          users,
+		lister:         lister,
+		clients:        clients,
+		grantStore:     config.GrantStore,
+		mfaStore:       config.MFACodeStore,
+		userBlocked:    config.UserBlockedStore,
+		assertions:     config.ClientAssertionStore,
+		ui:             uiFS(),
+		errors:         handlers.NewErrorPage(config),
+		mux:            http.NewServeMux(),
+		passkeys:       config.PasskeyStore,
+		passkeysOn:     config.PasskeysEnabled,
+		states:         config.UserStateStore,
+		resets:         config.PasswordResetStore,
+		events:         config.Events,
+		eventStore:     config.EventStore,
+		groupStore:     config.GroupStore,
+		config:         config,
+		eventRetention: config.EventRetention,
+		resetURL:       strings.TrimSuffix(config.Issuer, "/") + "/reset-password",
 	}
 
 	h.routes()
@@ -103,6 +126,7 @@ func (h *Handler) routes() {
 	}
 
 	api("GET /api/info", h.info)
+	api("GET /api/overview", h.overview)
 
 	api("GET /api/users", h.listUsers)
 	api("POST /api/users", h.createUser)
@@ -114,6 +138,23 @@ func (h *Handler) routes() {
 	api("DELETE /api/users/{id}/sessions/{session}", h.deleteSession)
 	api("DELETE /api/users/{id}/mfa", h.resetMFA)
 	api("POST /api/users/{id}/unblock", h.unblockUser)
+	api("POST /api/users/{id}/lock", h.lockUser)
+	api("POST /api/users/{id}/disable", h.disableUser)
+	api("POST /api/users/{id}/enable", h.enableUser)
+	api("POST /api/users/{id}/password", h.setPassword)
+	api("POST /api/users/{id}/temporary-password", h.temporaryPassword)
+	api("POST /api/users/{id}/reset-link", h.resetLink)
+	api("GET /api/users/{id}/passkeys", h.listPasskeys)
+	api("DELETE /api/users/{id}/passkeys", h.deletePasskeys)
+	api("DELETE /api/users/{id}/passkeys/{passkey}", h.deletePasskey)
+
+	api("GET /api/groups", h.listGroups)
+	api("POST /api/groups", h.createGroup)
+	api("PUT /api/groups/{name}", h.updateGroup)
+	api("DELETE /api/groups/{name}", h.deleteGroup)
+	api("GET /api/groups/{name}/members", h.listMembers)
+	api("POST /api/groups/{name}/members", h.addMembers)
+	api("DELETE /api/groups/{name}/members/{subject}", h.removeMember)
 
 	api("GET /api/clients", h.listClients)
 	api("POST /api/clients", h.createClient)
@@ -122,6 +163,14 @@ func (h *Handler) routes() {
 	api("DELETE /api/clients/{id}", h.deleteClient)
 	api("POST /api/clients/{id}/secret", h.rotateClientSecret)
 	api("DELETE /api/clients/{id}/tokens", h.revokeClientTokens)
+
+	api("GET /api/events", h.listEvents)
+	api("GET /api/events.csv", h.exportEvents)
+	api("GET /api/events/summary", h.eventSummary)
+
+	api("GET /api/settings", h.getSettings)
+	api("PUT /api/settings", h.updateSettings)
+	api("GET /api/settings/config.yml", h.exportSettings)
 
 	api("POST /api/maintenance/purge", h.purgeExpired)
 	api("POST /api/maintenance/logout-all", h.logoutAll)
@@ -141,7 +190,7 @@ func (h *Handler) requireAdmin(next http.Handler) http.Handler {
 		isAPI := strings.HasPrefix(r.URL.Path, "/api/")
 		utils.NoCache(w)
 
-		user, status := h.currentAdmin(r)
+		session, status := h.currentAdmin(r)
 		if status != http.StatusOK {
 			if isAPI {
 				writeError(w, status, http.StatusText(status))
@@ -156,11 +205,11 @@ func (h *Handler) requireAdmin(next http.Handler) http.Handler {
 			return
 		}
 
-		next.ServeHTTP(w, r.WithContext(contextWithAdmin(r, user)))
+		next.ServeHTTP(w, r.WithContext(contextWithAdmin(r, session)))
 	})
 }
 
-func (h *Handler) currentAdmin(r *http.Request) (domain.User, int) {
+func (h *Handler) currentAdmin(r *http.Request) (domain.Session, int) {
 	sessionID := utils.GetSessionIDFromCookie(r, h.masterKey)
 	if sessionID == "" {
 		return nil, http.StatusUnauthorized
@@ -171,11 +220,16 @@ func (h *Handler) currentAdmin(r *http.Request) (domain.User, int) {
 		return nil, http.StatusUnauthorized
 	}
 
-	if !session.User().InGroup(h.adminGroup) {
+	// the admin web is under the SessionAuthorized middleware, but its API is not
+	state, err := h.states.GetUserState(session.User().ID())
+	if err != nil || state.CanSignIn(h.now()) != nil {
+		return nil, http.StatusUnauthorized
+	}
+	if !session.User().InGroup(h.adminGroup) || (state.PasswordChangeRequired && !session.Passkey()) {
 		return nil, http.StatusForbidden
 	}
 
-	return session.User(), http.StatusOK
+	return session, http.StatusOK
 }
 
 func (h *Handler) serveUI(w http.ResponseWriter, r *http.Request) {
@@ -208,6 +262,11 @@ func (h *Handler) info(w http.ResponseWriter, r *http.Request) {
 		// the discouraged flows must be enabled in the configuration
 		"allow_implicit_flow":  h.allowImplicit,
 		"allow_password_grant": h.allowPassword,
+		"passkeys_enabled":     h.passkeysOn,
+		"users_listable":       h.lister != nil,
+		"groups_manageable":    h.users != nil,
+		"event_retention_days": int(h.eventRetention.Hours() / 24),
+		"passwords_manageable": h.passwordUpdater() != nil,
 		"me": map[string]string{
 			"subject":            user.ID(),
 			"preferred_username": user.Data().PreferredUsername,
@@ -216,23 +275,31 @@ func (h *Handler) info(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (h *Handler) purgeExpired(w http.ResponseWriter, _ *http.Request) {
+func (h *Handler) purgeExpired(w http.ResponseWriter, r *http.Request) {
 	now := h.now()
 	h.sessionStore.CleanExpired()
 	h.grantStore.CleanExpired()
 	h.userBlocked.CleanExpired(now)
 	h.assertions.CleanExpired(now)
+	h.config.DeviceCodeStore.CleanExpired(now)
+	h.resets.CleanExpired(now)
+	if err := h.eventStore.DeleteEventsBefore(now.Add(-h.eventRetention)); err != nil {
+		writeInternalError(w, err)
+		return
+	}
 	log.Println("admin: expired sessions, tokens and blocks purged")
+	h.audit(r, domain.EventAdminMaintenance, nil, "", "expired data purged")
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (h *Handler) logoutAll(w http.ResponseWriter, _ *http.Request) {
+func (h *Handler) logoutAll(w http.ResponseWriter, r *http.Request) {
 	if err := h.sessionStore.DeleteAllSessions(); err != nil {
 		writeInternalError(w, err)
 		return
 	}
 
 	log.Println("admin: all the sessions have been closed")
+	h.audit(r, domain.EventAdminMaintenance, nil, "", "all the users signed out")
 	w.WriteHeader(http.StatusNoContent)
 }
 

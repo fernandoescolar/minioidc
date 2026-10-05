@@ -41,13 +41,33 @@ func (ss *sqlSessionStore) NewSession(sessionID string, user domain.User, authTi
 	return ss.Session(session)
 }
 
+// NewPasskeySession creates a new Session for a User that signed in with a passkey
+func (ss *sqlSessionStore) NewPasskeySession(sessionID string, user domain.User, authTime, expiresAt time.Time) (domain.Session, error) {
+	session := &miniSession{
+		id:          sessionID,
+		userID:      user.ID(),
+		mfaVerified: true,
+		passkey:     true,
+		authTime:    authTime,
+		expiresAt:   expiresAt,
+	}
+
+	_, err := ss.db.Exec("INSERT INTO sessions(id, userID, requireMFA, expiresAt, authTime, mfaVerified, passkey) VALUES(?,?,?,?,?,?,?);",
+		session.id, session.userID, false, session.expiresAt, session.authTime, true, true)
+	if err != nil {
+		return nil, fmt.Errorf("NewPasskeySession: %w", err)
+	}
+
+	return ss.Session(session)
+}
+
 // GetSessionByID looks up the Session
 func (ss *sqlSessionStore) GetSessionByID(id string) (domain.Session, error) {
 	session := &miniSession{}
 	var authTime sql.NullTime
-	var mfaVerified sql.NullBool
-	row := ss.db.QueryRow("SELECT id, userID, expiresAt, requireMFA, authTime, mfaVerified FROM sessions WHERE id = ?;", id)
-	err := row.Scan(&session.id, &session.userID, &session.expiresAt, &session.requireMFA, &authTime, &mfaVerified)
+	var mfaVerified, passkey sql.NullBool
+	row := ss.db.QueryRow("SELECT id, userID, expiresAt, requireMFA, authTime, mfaVerified, passkey FROM sessions WHERE id = ?;", id)
+	err := row.Scan(&session.id, &session.userID, &session.expiresAt, &session.requireMFA, &authTime, &mfaVerified, &passkey)
 	if err != nil {
 		return nil, fmt.Errorf("GetSessionByID: %w", err)
 	}
@@ -55,6 +75,7 @@ func (ss *sqlSessionStore) GetSessionByID(id string) (domain.Session, error) {
 	// sessions created before the authTime column existed
 	session.authTime = authTime.Time
 	session.mfaVerified = mfaVerified.Bool
+	session.passkey = passkey.Bool
 
 	return ss.Session(session)
 }
@@ -185,5 +206,5 @@ func (ss *sqlSessionStore) Session(session *miniSession) (domain.Session, error)
 		return nil, fmt.Errorf("Session: %w", err)
 	}
 
-	return domain.NewSession(session.id, user, session.requireMFA, session.mfaVerified, session.authTime, session.expiresAt), nil
+	return session.toDomain(user), nil
 }

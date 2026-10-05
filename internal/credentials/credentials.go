@@ -6,6 +6,7 @@ package credentials
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -20,6 +21,9 @@ var (
 	ErrBlocked = errors.New("too many failed attempts")
 	// ErrInvalid means that the credentials are not valid
 	ErrInvalid = errors.New("invalid credentials")
+	// ErrLockout means that this failed attempt has blocked the user (it is
+	// also an ErrBlocked)
+	ErrLockout = fmt.Errorf("%w: the user has been blocked", ErrBlocked)
 )
 
 // Checker checks the credentials with the brute force protection of the login page
@@ -28,9 +32,15 @@ type Checker struct {
 	MFA        domain.MFACodeStore
 	Blocked    domain.UserBlockedStore
 	RequireMFA bool
+	// States are the states of the accounts (optional): the disabled and
+	// locked accounts, and the temporary passwords, are rejected
+	States domain.UserStateStore
 }
 
-// Authenticate returns the user and whether the MFA code was verified
+// Authenticate returns the user and whether the MFA code was verified. With
+// valid credentials, it returns domain.ErrAccountDisabled,
+// domain.ErrAccountLocked or domain.ErrPasswordChangeRequired if the account
+// cannot be used.
 func (c *Checker) Authenticate(username, password string, now time.Time) (domain.User, bool, error) {
 	key := LoginBlockKey(username)
 	if c.Blocked.IsBlocked(key, now) {
@@ -40,12 +50,26 @@ func (c *Checker) Authenticate(username, password string, now time.Time) (domain
 	user, mfa, ok := c.check(username, password, now)
 	if !ok {
 		if c.Blocked.AddFailedAttempt(key, now) {
-			return nil, false, ErrBlocked
+			return nil, false, ErrLockout
 		}
 		return nil, false, ErrInvalid
 	}
 
 	c.Blocked.Reset(key)
+	if c.States != nil {
+		state, err := c.States.GetUserState(user.ID())
+		if err != nil {
+			return nil, false, err
+		}
+		if err := state.CanSignIn(now); err != nil {
+			return nil, false, err
+		}
+		// a temporary password is only valid to change it in the login page
+		if state.PasswordChangeRequired {
+			return nil, false, domain.ErrPasswordChangeRequired
+		}
+	}
+
 	return user, mfa, nil
 }
 

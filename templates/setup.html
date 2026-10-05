@@ -27,7 +27,7 @@
                 {{ if .HasMFA }}
                 <p class="hint">The two-step verification is on.</p>
                 {{ else }}
-                <p class="hint">Add an <a class="link" href="{{ basePath }}/profile/mfa">authenticator app</a>: your account can manage the whole server.</p>
+                <p class="hint">Add {{ if .Passkeys }}a <a class="link" href="{{ basePath }}/profile/passkeys">passkey</a> or {{ end }}an <a class="link" href="{{ basePath }}/profile/mfa">authenticator app</a>: your account can manage the whole server.</p>
                 {{ end }}
             </div>
         </li>

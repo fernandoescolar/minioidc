@@ -51,6 +51,7 @@ func NewDefaultBuilder(dataDir, issuer string) (*Builder, error) {
 		MasterKey:             strings.TrimSpace(string(masterKey)),
 		PrivateRSAKeyFilepath: keyPath,
 		AdminEnabled:          true,
+		DataDir:               dataDir,
 		UseCSP:                true,
 		UseSecureCookie:       https,
 		UseHSTS:               https,

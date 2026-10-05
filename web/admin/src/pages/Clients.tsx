@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
 import { api, authMethods, grantTypes, usesSecret, type AuthMethod, type Client, type Info } from '../api'
-import { Badge, EmptyState, Field, Modal, SecretDialog, Spinner, lines, useAction, useConfirm } from '../components/ui'
+import { Badge, EmptyState, Field, GroupPicker, Modal, SecretDialog, Spinner, lines, useAction, useConfirm } from '../components/ui'
+import { useGroupNames } from './Groups'
 
 const PEM = /-----BEGIN [^-]+-----[\s\S]*?-----END [^-]+-----/g
 
@@ -174,6 +175,8 @@ function ClientDialog({
   const [jwksURI, setJwksURI] = useState(client?.jwks_uri ?? '')
   const [publicKeys, setPublicKeys] = useState((client?.public_keys ?? []).join('\n'))
   const [grants, setGrants] = useState<string[]>(client?.grant_types ?? ['authorization_code', 'refresh_token'])
+  const [allowedGroups, setAllowedGroups] = useState<string[]>(client?.allowed_groups ?? [])
+  const groupNames = useGroupNames()
   const toggleGrant = (value: string) =>
     setGrants((current) => (current.includes(value) ? current.filter((g) => g !== value) : [...current, value]))
   const [saving, setSaving] = useState(false)
@@ -192,6 +195,7 @@ function ClientDialog({
       jwks_uri: method === 'private_key_jwt' ? jwksURI.trim() : '',
       public_keys: method === 'private_key_jwt' ? (publicKeys.match(PEM) ?? []) : [],
       grant_types: grants,
+      allowed_groups: allowedGroups,
     }
     let result: Client | undefined
     const ok = await run(async () => {
@@ -277,6 +281,13 @@ function ClientDialog({
           />
         </Field>
 
+        <Field
+          label="Allowed groups"
+          htmlFor="allowed-groups"
+          hint="Only the members of these groups can sign in to this client. Empty: all the users."
+        >
+          <GroupPicker id="allowed-groups" value={allowedGroups} onChange={setAllowedGroups} suggestions={groupNames} placeholder="All the users" />
+        </Field>
         <Field label="Post logout redirect URIs" htmlFor="post-logout-uris" hint="One per line">
           <textarea
             id="post-logout-uris"

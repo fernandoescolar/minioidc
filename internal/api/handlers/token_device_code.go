@@ -55,6 +55,21 @@ func (h *TokenHandler) issueForUser(w http.ResponseWriter, client domain.Client,
 }
 
 func (h *TokenHandler) issueForUserAt(w http.ResponseWriter, client domain.Client, user domain.User, scopes []string, now, authTime time.Time, mfaVerified, idToken bool) {
+	// the disabled and locked accounts do not get tokens by any grant
+	if err := domain.CheckSignIn(h.userStates, user.ID(), now); err != nil {
+		utils.Error(w, utils.InvalidGrant, "The account cannot be used: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if !client.UserAllowed(user) {
+		h.events.Record(nil, domain.Event{
+			Type: domain.EventLoginDenied, Result: domain.ResultFailure, UserID: user.ID(),
+			Username: user.Data().PreferredUsername, ClientID: client.ClientID(), Detail: "not in the allowed groups of the client",
+		})
+		utils.Error(w, utils.InvalidGrant, "The user cannot use this client", http.StatusBadRequest)
+		return
+	}
+
 	session, err := h.sessionStore.NewSession(stores.CreateUID(), user, authTime, now.Add(h.sessionTTL), false)
 	if err != nil {
 		utils.InternalServerError(w, fmt.Sprintf("creating session: %v", err))

@@ -20,6 +20,7 @@ type MFAVerifyHandler struct {
 	mfaStore       domain.MFACodeStore
 	sessionStore   domain.SessionStore
 	userBlocked    domain.UserBlockedStore
+	events         *domain.Recorder
 	home           string
 }
 
@@ -43,6 +44,7 @@ func NewMfaVerifyHandler(config *domain.Config, now func() time.Time, createEndp
 		mfaStore:       config.MFACodeStore,
 		sessionStore:   config.SessionStore,
 		userBlocked:    config.UserBlockedStore,
+		events:         config.Events,
 		home:           config.BasePath + "/",
 	}
 }
@@ -112,13 +114,19 @@ func (h *MFAVerifyHandler) postHTTP(w http.ResponseWriter, r *http.Request) {
 
 	now := h.now()
 	blockKey := "mfa:" + session.User().ID()
+	user := session.User()
 	if h.userBlocked.IsBlocked(blockKey, now) {
+		h.events.RecordUser(r, domain.EventLoginMFA, domain.ResultFailure, user, "blocked: too many failed attempts")
 		h.render(w, r, mfaVerifyModel{TooManyAttempts: true})
 		return
 	}
 
 	if !verifyAnyMFA(mfas, verificationCode, now) {
 		blocked := h.userBlocked.AddFailedAttempt(blockKey, now)
+		h.events.RecordUser(r, domain.EventLoginMFA, domain.ResultFailure, user, "invalid code")
+		if blocked {
+			h.events.RecordUser(r, domain.EventLoginLockout, domain.ResultFailure, user, "the MFA codes")
+		}
 		h.render(w, r, mfaVerifyModel{InvalidVerificationCode: !blocked, TooManyAttempts: blocked})
 		return
 	}
@@ -130,6 +138,7 @@ func (h *MFAVerifyHandler) postHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.userBlocked.Reset(blockKey)
+	h.events.RecordUser(r, domain.EventLoginMFA, domain.ResultSuccess, user, "")
 	http.Redirect(w, r, utils.GetReturnURL(r, h.home), http.StatusFound)
 }
 

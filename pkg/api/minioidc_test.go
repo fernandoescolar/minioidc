@@ -95,6 +95,8 @@ func newTestServer(t *testing.T, requireMFA bool, options ...func(*api.Builder))
 		ProfilePasswordTemplateFilepath: "../../templates/profile_password.html",
 		ProfileMFATemplateFilepath:      "../../templates/profile_mfa.html",
 		SetupTemplateFilepath:           "../../templates/setup.html",
+		ProfilePasskeysTemplateFilepath: "../../templates/profile_passkeys.html",
+		ResetPasswordTemplateFilepath:   "../../templates/reset_password.html",
 		Clients: []api.Client{
 			{ID: clientID, SecretHash: secretHash, RedirectURIs: []string{redirectURI, redirectURI2}, PostLogoutRedirectURIs: []string{postLogoutURI}},
 			{ID: otherClientID, SecretHash: secretHash, RedirectURIs: []string{redirectURI}},

@@ -22,6 +22,9 @@ type ProfilePasswordHandler struct {
 	userStore    domain.UserStore
 	sessionStore domain.SessionStore
 	userBlocked  domain.UserBlockedStore
+	events       *domain.Recorder
+	userStates   domain.UserStateStore
+	home         string
 }
 
 type profilePasswordModel struct {
@@ -34,6 +37,9 @@ type profilePasswordModel struct {
 	TooManyAttempts  bool
 	UnknownError     bool
 	FormExpired      bool
+	SamePassword     bool
+	// Required is true with a temporary password: the user must change it
+	Required bool
 }
 
 var _ http.Handler = (*ProfilePasswordHandler)(nil)
@@ -46,6 +52,9 @@ func NewProfilePasswordHandler(config *domain.Config, now func() time.Time) *Pro
 		userStore:    config.UserStore,
 		sessionStore: config.SessionStore,
 		userBlocked:  config.UserBlockedStore,
+		events:       config.Events,
+		userStates:   config.UserStateStore,
+		home:         config.BasePath + "/",
 	}
 }
 
@@ -64,7 +73,7 @@ func (h *ProfilePasswordHandler) ServeHTTP(w http.ResponseWriter, r *http.Reques
 
 	switch r.Method {
 	case http.MethodGet:
-		h.render(w, profilePasswordModel{CSRF: utils.GetCSRFToken(r)})
+		h.render(w, session, profilePasswordModel{CSRF: utils.GetCSRFToken(r)})
 	case http.MethodPost:
 		h.postHTTP(w, r, session, updater)
 	default:
@@ -74,7 +83,7 @@ func (h *ProfilePasswordHandler) ServeHTTP(w http.ResponseWriter, r *http.Reques
 
 func (h *ProfilePasswordHandler) postHTTP(w http.ResponseWriter, r *http.Request, session domain.Session, updater domain.PasswordUpdater) {
 	if !utils.GetCSRFValid(r) {
-		h.render(w, profilePasswordModel{CSRF: utils.GetCSRFToken(r), FormExpired: true})
+		h.render(w, session, profilePasswordModel{CSRF: utils.GetCSRFToken(r), FormExpired: true})
 		return
 	}
 
@@ -86,14 +95,15 @@ func (h *ProfilePasswordHandler) postHTTP(w http.ResponseWriter, r *http.Request
 	blockKey := credentials.LoginBlockKey(user.Data().PreferredUsername)
 	if h.userBlocked.IsBlocked(blockKey, now) {
 		model.TooManyAttempts = true
-		h.render(w, model)
+		h.render(w, session, model)
 		return
 	}
 
 	if !user.PasswordIsValid(r.PostFormValue("current_password")) {
+		h.events.RecordUser(r, domain.EventPasswordChange, domain.ResultFailure, user, "invalid current password")
 		model.TooManyAttempts = h.userBlocked.AddFailedAttempt(blockKey, now)
 		model.InvalidPassword = !model.TooManyAttempts
-		h.render(w, model)
+		h.render(w, session, model)
 		return
 	}
 
@@ -103,9 +113,11 @@ func (h *ProfilePasswordHandler) postHTTP(w http.ResponseWriter, r *http.Request
 		model.PasswordMismatch = true
 	case len(newPassword) < minPasswordLength:
 		model.WeakPassword = true
+	case newPassword == r.PostFormValue("current_password"):
+		model.SamePassword = true
 	}
-	if model.PasswordMismatch || model.WeakPassword {
-		h.render(w, model)
+	if model.PasswordMismatch || model.WeakPassword || model.SamePassword {
+		h.render(w, session, model)
 		return
 	}
 
@@ -116,14 +128,27 @@ func (h *ProfilePasswordHandler) postHTTP(w http.ResponseWriter, r *http.Request
 	if err != nil {
 		log.Printf("Error updating password: %v", err)
 		model.UnknownError = true
-		h.render(w, model)
+		h.render(w, session, model)
 		return
 	}
 
 	h.userBlocked.Reset(blockKey)
 	h.closeOtherSessions(session, now)
+	h.events.RecordUser(r, domain.EventPasswordChange, domain.ResultSuccess, user, "")
+
+	// the temporary password has been changed: continue where the user was going
+	if state, err := h.userStates.GetUserState(user.ID()); err == nil && state.PasswordChangeRequired {
+		state.PasswordChangeRequired = false
+		if err := h.userStates.SaveUserState(state); err != nil {
+			log.Printf("Error saving the user state: %v", err)
+		}
+
+		http.Redirect(w, r, utils.GetReturnURL(r, h.home), http.StatusSeeOther)
+		return
+	}
+
 	model.Success = true
-	h.render(w, model)
+	h.render(w, session, model)
 }
 
 // closeOtherSessions logs out the other sessions of the user: if the password
@@ -142,7 +167,9 @@ func (h *ProfilePasswordHandler) closeOtherSessions(current domain.Session, now 
 	}
 }
 
-func (h *ProfilePasswordHandler) render(w http.ResponseWriter, model profilePasswordModel) {
+func (h *ProfilePasswordHandler) render(w http.ResponseWriter, session domain.Session, model profilePasswordModel) {
+	state, _ := h.userStates.GetUserState(session.User().ID())
+	model.Required = state.PasswordChangeRequired
 	model.Name = h.name
 	utils.RenderTemplate(w, h.template, model)
 }

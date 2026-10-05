@@ -20,6 +20,7 @@ type miniSession struct {
 	userID      string
 	requireMFA  bool
 	mfaVerified bool
+	passkey     bool
 	authTime    time.Time
 	expiresAt   time.Time
 }
@@ -39,6 +40,21 @@ func (ss *miniSessionStore) NewSession(sessionID string, user domain.User, authT
 		requireMFA: requireMFA,
 		authTime:   authTime,
 		expiresAt:  expiresAt,
+	}
+
+	ss.Store(sessionID, session)
+	return ss.Session(session)
+}
+
+// NewPasskeySession creates a new Session for a User that signed in with a passkey
+func (ss *miniSessionStore) NewPasskeySession(sessionID string, user domain.User, authTime, expiresAt time.Time) (domain.Session, error) {
+	session := &miniSession{
+		id:          sessionID,
+		userID:      user.ID(),
+		mfaVerified: true,
+		passkey:     true,
+		authTime:    authTime,
+		expiresAt:   expiresAt,
 	}
 
 	ss.Store(sessionID, session)
@@ -157,5 +173,13 @@ func (ss *miniSessionStore) Session(session *miniSession) (domain.Session, error
 		return nil, fmt.Errorf("Session: %w", err)
 	}
 
-	return domain.NewSession(session.id, user, session.requireMFA, session.mfaVerified, session.authTime, session.expiresAt), nil
+	return session.toDomain(user), nil
+}
+
+func (session *miniSession) toDomain(user domain.User) domain.Session {
+	if session.passkey {
+		return domain.NewPasskeySession(session.id, user, session.authTime, session.expiresAt)
+	}
+
+	return domain.NewSession(session.id, user, session.requireMFA, session.mfaVerified, session.authTime, session.expiresAt)
 }

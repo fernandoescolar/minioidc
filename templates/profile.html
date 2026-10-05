@@ -12,6 +12,15 @@
             <span>Change password</span><span aria-hidden="true">›</span>
         </a>
         {{ end }}
+        {{ if .PasskeysEnabled }}
+        <a class="menu-item" href="{{ basePath }}/profile/passkeys">
+            <span>Passkeys</span>
+            <span class="flex items-center gap-2">
+                {{ if .Passkeys }}<span class="badge bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">{{ .Passkeys }}</span>{{ end }}
+                <span aria-hidden="true">›</span>
+            </span>
+        </a>
+        {{ end }}
         <a class="menu-item" href="{{ basePath }}/profile/mfa">
             <span>Two-step verification</span>
             <span class="flex items-center gap-2">

@@ -6,6 +6,9 @@
         <p class="page-subtitle">Use your {{ .Name }} account</p>
     </div>
 
+    {{ if .PasswordReset }}<div class="alert-success" role="status">Your password has been changed. Sign in with the new password.</div>{{ end }}
+    {{ if .AccountDisabled }}<div class="alert-error" role="alert">This account is disabled. Contact the administrator.</div>{{ end }}
+    {{ if .AccountLocked }}<div class="alert-error" role="alert">This account is locked. Try it again later or contact the administrator.</div>{{ end }}
     {{ if .InvalidLogin }}<div class="alert-error" role="alert">Invalid login: check your username and password.</div>{{ end }}
     {{ if .TooManyAttempts }}<div class="alert-error" role="alert">Too many failed attempts. Try it again later.</div>{{ end }}
     {{ if .FormExpired }}<div class="alert-warning" role="alert">The form has expired. Please try again.</div>{{ end }}
@@ -14,7 +17,7 @@
     <form class="stack" method="post">
         <div>
             <label class="label" for="username">Username</label>
-            <input class="input" id="username" name="username" type="text" value="{{ .Username }}" autocomplete="username" autocapitalize="none" spellcheck="false" required {{ if not .Username }}autofocus{{ end }}>
+            <input class="input" id="username" name="username" type="text" value="{{ .Username }}" autocomplete="{{ if .Passkeys }}username webauthn{{ else }}username{{ end }}" autocapitalize="none" spellcheck="false" required {{ if not .Username }}autofocus{{ end }}>
         </div>
         <div>
             <label class="label" for="password">Password</label>
@@ -23,5 +26,17 @@
         <input type="hidden" name="__csrf" value="{{ .CSRF }}">
         <button class="btn-primary btn-block" type="submit">Sign in</button>
     </form>
+
+    {{ if .Passkeys }}
+    <div class="stack" data-passkey-login data-begin="{{ basePath }}/passkey/login/begin" data-finish="{{ basePath }}/passkey/login/finish" hidden>
+        <div class="divider">or</div>
+        <div class="alert-error" role="alert" data-passkey-error hidden></div>
+        <button class="btn-secondary btn-block" type="button">
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="4"/><path d="M2 21v-1a6 6 0 0 1 9-5.2"/><circle cx="17" cy="14" r="2.5"/><path d="M17 16.5V22l1.5-1.5L17 19"/></svg>
+            Sign in with a passkey
+        </button>
+    </div>
+    <script src="{{ basePath }}/static/passkey.js" defer></script>
+    {{ end }}
 </div>
 {{ end }}

@@ -2,30 +2,47 @@ import { useEffect, useState } from 'react'
 import { api, type Info } from './api'
 import { Spinner } from './components/ui'
 import { ClientsPage } from './pages/Clients'
-import { MaintenancePage } from './pages/Maintenance'
+import { GroupsPage } from './pages/Groups'
+import { ActivityPage } from './pages/Activity'
+import { OverviewPage } from './pages/Overview'
+import { SettingsPage } from './pages/Settings'
+import { UserDetailPage } from './pages/UserDetail'
 import { UsersPage } from './pages/Users'
 
 const pages = [
+  { id: 'overview', label: 'Overview' },
   { id: 'users', label: 'Users' },
+  { id: 'groups', label: 'Groups' },
   { id: 'clients', label: 'Clients' },
-  { id: 'maintenance', label: 'Maintenance' },
+  { id: 'activity', label: 'Activity' },
+  { id: 'settings', label: 'Settings' },
 ] as const
 
 type PageId = (typeof pages)[number]['id']
 
-// hash routes: the server only serves index.html, whatever the issuer path is
-function currentPage(): PageId {
-  const hash = window.location.hash.replace(/^#\/?/, '')
-  return pages.find((p) => p.id === hash)?.id ?? 'users'
+interface Route {
+  page: PageId
+  /** the segments after the page: #/users/<subject>/<tab> */
+  segments: string[]
+}
+
+// hash routes: the server only serves index.html, whatever the issuer path is.
+// The pages can have segments and parameters: #/users/<subject>/security,
+// #/activity?user=<subject>
+function currentRoute(): Route {
+  const [path] = window.location.hash.replace(/^#\/?/, '').split('?')
+  const [first, ...segments] = path.split('/').map((s) => decodeURIComponent(s))
+  return { page: pages.find((p) => p.id === first)?.id ?? 'overview', segments }
 }
 
 export function App() {
-  const [page, setPage] = useState<PageId>(currentPage)
+  const [route, setRoute] = useState<Route>(currentRoute)
+  const page = route.page
   const [info, setInfo] = useState<Info | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    const onHash = () => setPage(currentPage())
+    const onHash = () => setRoute(currentRoute())
     window.addEventListener('hashchange', onHash)
     return () => window.removeEventListener('hashchange', onHash)
   }, [])
@@ -43,7 +60,7 @@ export function App() {
       <header className="border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-x-6 gap-y-3 px-4 py-3">
           <div className="flex min-w-0 flex-wrap items-center gap-x-6 gap-y-2">
-            <a href="#/users" className="flex items-center gap-2.5 text-lg font-semibold tracking-tight">
+            <a href="#/overview" className="flex items-center gap-2.5 text-lg font-semibold tracking-tight">
               <span className="brand-mark" aria-hidden="true">
                 {(info?.name ?? 'm').trim().charAt(0).toUpperCase()}
               </span>
@@ -88,12 +105,20 @@ export function App() {
           </div>
         ) : !info ? (
           <Spinner />
+        ) : page === 'overview' ? (
+          <OverviewPage info={info} />
+        ) : page === 'users' && route.segments[0] ? (
+          <UserDetailPage key={route.segments[0]} info={info} subject={route.segments[0]} tab={route.segments[1] ?? 'profile'} />
         ) : page === 'users' ? (
-          <UsersPage info={info} />
+          <UsersPage key={window.location.hash} info={info} />
+        ) : page === 'groups' ? (
+          <GroupsPage info={info} />
         ) : page === 'clients' ? (
           <ClientsPage info={info} />
+        ) : page === 'activity' ? (
+          <ActivityPage key={window.location.hash} info={info} />
         ) : (
-          <MaintenancePage />
+          <SettingsPage />
         )}
       </main>
     </div>

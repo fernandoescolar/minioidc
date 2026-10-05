@@ -16,7 +16,8 @@ const createSqlite string = `
 	requireMFA INTEGER DEFAULT 1,
 	expiresAt DATETIME NOT NULL,
 	authTime DATETIME,
-	mfaVerified INTEGER DEFAULT 0
+	mfaVerified INTEGER DEFAULT 0,
+	passkey INTEGER DEFAULT 0
   );
   CREATE TABLE IF NOT EXISTS grants (
 	id TEXT PRIMARY KEY,
@@ -55,7 +56,8 @@ const createSqlite string = `
 	authMethod TEXT NOT NULL DEFAULT '',
 	jwksURI TEXT NOT NULL DEFAULT '',
 	publicKeys TEXT NOT NULL DEFAULT '[]',
-	grantTypes TEXT NOT NULL DEFAULT '[]'
+	grantTypes TEXT NOT NULL DEFAULT '[]',
+	allowedGroups TEXT NOT NULL DEFAULT '[]'
   );
   CREATE TABLE IF NOT EXISTS device_codes (
 	deviceCodeHash TEXT PRIMARY KEY,
@@ -74,6 +76,53 @@ const createSqlite string = `
 	id TEXT PRIMARY KEY,
 	expiresAt INTEGER NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS groups (
+	name TEXT PRIMARY KEY,
+	description TEXT NOT NULL DEFAULT '',
+	createdAt INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE TABLE IF NOT EXISTS events (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	time INTEGER NOT NULL,
+	type TEXT NOT NULL,
+	result TEXT NOT NULL,
+	userID TEXT NOT NULL DEFAULT '',
+	username TEXT NOT NULL DEFAULT '',
+	clientID TEXT NOT NULL DEFAULT '',
+	actor TEXT NOT NULL DEFAULT '',
+	ip TEXT NOT NULL DEFAULT '',
+	userAgent TEXT NOT NULL DEFAULT '',
+	detail TEXT NOT NULL DEFAULT ''
+  );
+  CREATE INDEX IF NOT EXISTS events_time ON events(time);
+  CREATE INDEX IF NOT EXISTS events_user ON events(userID, type, result);
+  CREATE TABLE IF NOT EXISTS user_states (
+	subject TEXT PRIMARY KEY,
+	disabled INTEGER NOT NULL DEFAULT 0,
+	disabledReason TEXT NOT NULL DEFAULT '',
+	disabledAt INTEGER NOT NULL DEFAULT 0,
+	disabledBy TEXT NOT NULL DEFAULT '',
+	locked INTEGER NOT NULL DEFAULT 0,
+	lockedUntil INTEGER NOT NULL DEFAULT 0,
+	lockReason TEXT NOT NULL DEFAULT '',
+	lockedAt INTEGER NOT NULL DEFAULT 0,
+	lockedBy TEXT NOT NULL DEFAULT '',
+	passwordChangeRequired INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE TABLE IF NOT EXISTS password_resets (
+	id TEXT PRIMARY KEY,
+	userID TEXT NOT NULL,
+	expiresAt DATETIME NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS passkeys (
+	id TEXT PRIMARY KEY,
+	userID TEXT NOT NULL,
+	name TEXT NOT NULL DEFAULT '',
+	credential TEXT NOT NULL,
+	createdAt INTEGER NOT NULL,
+	lastUsedAt INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE INDEX IF NOT EXISTS passkeys_userID ON passkeys(userID);
   CREATE TABLE IF NOT EXISTS mfa (
 	id TEXT PRIMARY KEY,
 	userID TEXT NOT NULL,
@@ -124,6 +173,10 @@ func migrate(database *sql.DB) error {
 		return err
 	}
 
+	if err := addColumn(database, "sessions", "passkey", "INTEGER DEFAULT 0"); err != nil {
+		return err
+	}
+
 	// issuedAt also exists (NOT NULL) in the databases created by other versions
 	for column, columnType := range map[string]string{"redirectURI": "TEXT", "familyID": "TEXT", "used": "INTEGER DEFAULT 0", "issuedAt": "DATETIME"} {
 		if err := addColumn(database, "grants", column, columnType); err != nil {
@@ -132,6 +185,10 @@ func migrate(database *sql.DB) error {
 	}
 
 	if err := addColumn(database, "clients", "grantTypes", "TEXT NOT NULL DEFAULT '[]'"); err != nil {
+		return err
+	}
+
+	if err := addColumn(database, "clients", "allowedGroups", "TEXT NOT NULL DEFAULT '[]'"); err != nil {
 		return err
 	}
 

@@ -84,6 +84,7 @@ func newFixture(t *testing.T, configure func(*domain.Config)) *fixture {
 		UserStore:        users,
 		MFACodeStore:     mfa,
 		UserBlockedStore: stores.NewUserBlockedStore(),
+		UserStateStore:   stores.NewUserStateStore(),
 		LDAPServer: &domain.LDAPServerConfig{
 			Address:          freeAddress(t),
 			BaseDN:           baseDN,
@@ -285,6 +286,62 @@ func TestUserBind(t *testing.T) {
 	expectDNs(t, entries, err, aliceDN, bobDN)
 }
 
+// the binds of the users are in the activity log
+func TestBindsInTheActivityLog(t *testing.T) {
+	events := stores.NewEventStore()
+	f := newFixture(t, func(c *domain.Config) { c.EventStore = events })
+	conn := f.dial(t)
+
+	expectCode(t, conn.Bind(aliceDN, "wrong"), ldap.LDAPResultInvalidCredentials)
+	if err := conn.Bind(aliceDN, password); err != nil {
+		t.Fatal(err)
+	}
+
+	list, _ := events.ListEvents(domain.EventFilter{TypePrefix: domain.EventLoginLDAP})
+	if len(list) != 2 || list[0].Result != domain.ResultSuccess || list[0].UserID != "1" ||
+		list[1].Result != domain.ResultFailure || list[1].Username != "alice" {
+		t.Errorf("Unexpected events: %+v", list)
+	}
+}
+
+// the disabled and locked accounts, and the temporary passwords, cannot bind
+func TestAccountStateInBinds(t *testing.T) {
+	var states domain.UserStateStore
+	f := newFixture(t, func(c *domain.Config) { states = c.UserStateStore })
+	conn := f.dial(t)
+
+	for name, state := range map[string]domain.UserState{
+		"disabled":           {Subject: "1", Disabled: true},
+		"locked":             {Subject: "1", Locked: true},
+		"temporary password": {Subject: "1", PasswordChangeRequired: true},
+	} {
+		if err := states.SaveUserState(state); err != nil {
+			t.Fatal(err)
+		}
+		if err := conn.Bind(aliceDN, password); resultCode(err) != ldap.LDAPResultInvalidCredentials {
+			t.Errorf("%s: expected the bind to fail, got %v", name, err)
+		}
+	}
+
+	// an expired lock does not count
+	if err := states.SaveUserState(domain.UserState{Subject: "1", Locked: true, LockedUntil: time.Now().Add(-time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.Bind(aliceDN, password); err != nil {
+		t.Fatalf("Expected alice to bind after the lock: %v", err)
+	}
+
+	// the disabled accounts are not in the directory
+	if err := states.SaveUserState(domain.UserState{Subject: "2", Disabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.Bind(serviceDN, servicePassword); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := search(conn, baseDN, ldap.ScopeWholeSubtree, "(objectClass=inetOrgPerson)")
+	expectDNs(t, entries, err, aliceDN)
+}
+
 func TestUserBindWithMFA(t *testing.T) {
 	f := newFixture(t, nil)
 	conn := f.dial(t)
@@ -391,7 +448,7 @@ func TestInvalidConfiguration(t *testing.T) {
 		"missing certificate":  {BaseDN: baseDN, TLSMode: domain.LDAPTLSLDAPS, TLSCertPath: "missing.pem", TLSKeyPath: "missing.pem"},
 	} {
 		cfg := cfg
-		if _, err := New(&domain.Config{UserStore: users, LDAPServer: &cfg}, time.Now); err == nil {
+		if _, err := New(&domain.Config{UserStore: users, UserStateStore: stores.NewUserStateStore(), LDAPServer: &cfg}, time.Now); err == nil {
 			t.Errorf("%s: expected an error", name)
 		}
 	}

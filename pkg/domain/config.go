@@ -9,6 +9,12 @@ import (
 type Config struct {
 	// is the display name of server.
 	Name string
+	// ConfigFilepath is the configuration file (empty without it).
+	ConfigFilepath string
+	// DataDir is the data directory of the default configuration (without a file).
+	DataDir string
+	// SqliteFilepath is the database (empty without it).
+	SqliteFilepath string
 	// is the key to internal encryption in the server.
 	MasterKey string
 
@@ -65,6 +71,21 @@ type Config struct {
 	UserBlockedStore UserBlockedStore
 	// is the store used to save MFA codes.
 	MFACodeStore MFACodeStore
+	// is the store used to save the passkeys.
+	PasskeyStore PasskeyStore
+	// is the store used to save the state of the accounts (disabled, locked…).
+	UserStateStore UserStateStore
+	// is the store used to save the password reset links.
+	PasswordResetStore PasswordResetStore
+	// is the store of the definitions of the groups (their descriptions).
+	GroupStore GroupStore
+	// is the store of the activity log (the logins, the changes of the
+	// accounts and the actions of the administrators).
+	EventStore EventStore
+	// Events writes the activity log. The router creates it with its clock.
+	Events *Recorder
+	// EventRetention is how long the events are kept.
+	EventRetention time.Duration
 	// is the store used to save the used client assertions (jti).
 	ClientAssertionStore ClientAssertionStore
 	// is the store used to save the device codes (RFC 8628).
@@ -100,6 +121,13 @@ type Config struct {
 	ProfileMFATemplateFilepath string
 	// the filepath of the onboarding template (the first administrator).
 	SetupTemplateFilepath string
+	// the filepath of the passkeys management template.
+	ProfilePasskeysTemplateFilepath string
+	// the filepath of the template of the password reset links.
+	ResetPasswordTemplateFilepath string
+
+	// if true, the users can sign in with passkeys (WebAuthn).
+	PasskeysEnabled bool
 
 	// is the code to create the first administrator when there are no users.
 	// Empty to generate a random one (it is written in the log).

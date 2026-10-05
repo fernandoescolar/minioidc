@@ -17,7 +17,9 @@ type DeviceHandler struct {
 	now             func() time.Time
 	template        *template.Template
 	deviceCodeStore domain.DeviceCodeStore
+	clientStore     domain.ClientStore
 	userBlocked     domain.UserBlockedStore
+	events          *domain.Recorder
 }
 
 type deviceModel struct {
@@ -41,7 +43,9 @@ func NewDeviceHandler(config *domain.Config, now func() time.Time) *DeviceHandle
 		now:             now,
 		template:        utils.ParseTemplates(config.BasePath, config.BaseTemplateFilepath, config.DeviceTemplateFilepath),
 		deviceCodeStore: config.DeviceCodeStore,
+		clientStore:     config.ClientStore,
 		userBlocked:     config.UserBlockedStore,
+		events:          config.Events,
 	}
 }
 
@@ -81,21 +85,43 @@ func (h *DeviceHandler) postHTTP(w http.ResponseWriter, r *http.Request, session
 	now := h.now()
 	switch r.PostFormValue("action") {
 	case "approve":
+		// the device would not get the tokens: it is told now, and it stops waiting
+		if client, err := h.clientStore.GetClientByID(model.ClientID); err != nil || !client.UserAllowed(session.User()) {
+			_ = h.deviceCodeStore.Deny(model.UserCode, now)
+			user := session.User()
+			h.events.Record(r, domain.Event{
+				Type: domain.EventLoginDenied, Result: domain.ResultFailure, UserID: user.ID(),
+				Username: user.Data().PreferredUsername, ClientID: model.ClientID, Detail: "not in the allowed groups of the client",
+			})
+			model.Error = "Your account cannot use this application. Contact the administrator."
+			break
+		}
+
 		mfa := contains("mfa", session.AuthMethods())
 		if err := h.deviceCodeStore.Approve(model.UserCode, session.User().ID(), session.AuthTime(), mfa, now); err != nil {
 			model.Error = "This code is no longer valid"
 			break
 		}
 		model.Authorized = true
+		h.recordDevice(r, session, model.ClientID, "approved")
 	case "deny":
 		if err := h.deviceCodeStore.Deny(model.UserCode, now); err != nil {
 			model.Error = "This code is no longer valid"
 			break
 		}
 		model.Denied = true
+		h.recordDevice(r, session, model.ClientID, "denied")
 	}
 
 	h.render(w, model)
+}
+
+func (h *DeviceHandler) recordDevice(r *http.Request, session domain.Session, clientID, detail string) {
+	user := session.User()
+	h.events.Record(r, domain.Event{
+		Type: domain.EventDeviceApprove, Result: domain.ResultSuccess, UserID: user.ID(),
+		Username: user.Data().PreferredUsername, ClientID: clientID, Detail: detail,
+	})
 }
 
 // lookup fills the client of a pending user code. The failed lookups count as

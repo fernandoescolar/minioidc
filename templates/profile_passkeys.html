@@ -1,0 +1,68 @@
+{{ define "title" }}Passkeys · {{ .Name }}{{ end }}
+{{ define "content" }}
+<div class="stack">
+    <div>
+        <a class="link text-sm" href="{{ basePath }}/profile">‹ Your account</a>
+        <h1 class="page-title mt-2">Passkeys</h1>
+        <p class="page-subtitle">Sign in with your fingerprint, face or screen lock instead of your password. A passkey is also your second step.</p>
+    </div>
+
+    {{ if .Added }}<div class="alert-success" role="status">Passkey added. Next time, choose "Sign in with a passkey".</div>{{ end }}
+    {{ if .Renamed }}<div class="alert-success" role="status">Passkey renamed.</div>{{ end }}
+    {{ if .Deleted }}<div class="alert-success" role="status">Passkey removed. Remove it from your device or password manager too.</div>{{ end }}
+    {{ if .NotFound }}<div class="alert-error" role="alert">The passkey does not exist.</div>{{ end }}
+    {{ if .FormExpired }}<div class="alert-warning" role="alert">The form has expired. Please try again.</div>{{ end }}
+    {{ if .UnknownError }}<div class="alert-error" role="alert">Something went wrong. Try it again later or contact the administrator.</div>{{ end }}
+    {{ if not .RecentAuth }}<div class="alert-info" role="status">For your security, <a class="link" href="{{ .ReauthURL }}">sign in again</a> to add or remove passkeys.</div>{{ end }}
+
+    {{ if .Passkeys }}
+    <ul class="menu">
+        {{ range .Passkeys }}
+        <li class="flex flex-col gap-2 py-3">
+            <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                    <p class="truncate text-sm font-medium">{{ .Name }}</p>
+                    <p class="hint mt-0.5">Added {{ .CreatedAt }} · {{ if .LastUsedAt }}Last used {{ .LastUsedAt }}{{ else }}Not used yet{{ end }}</p>
+                </div>
+                {{ if $.RecentAuth }}
+                <form method="post">
+                    <input type="hidden" name="action" value="delete">
+                    <input type="hidden" name="id" value="{{ .ID }}">
+                    <input type="hidden" name="__csrf" value="{{ $.CSRF }}">
+                    <button class="btn-ghost text-red-600 dark:text-red-400" type="submit">Remove</button>
+                </form>
+                {{ end }}
+            </div>
+            <details class="text-sm">
+                <summary class="link cursor-pointer">Rename</summary>
+                <form class="mt-2 flex gap-2" method="post">
+                    <label class="sr-only" for="name_{{ .ID }}">Name</label>
+                    <input class="input" id="name_{{ .ID }}" name="name" type="text" value="{{ .Name }}" maxlength="64" required>
+                    <input type="hidden" name="action" value="rename">
+                    <input type="hidden" name="id" value="{{ .ID }}">
+                    <input type="hidden" name="__csrf" value="{{ $.CSRF }}">
+                    <button class="btn-secondary" type="submit">Save</button>
+                </form>
+            </details>
+        </li>
+        {{ end }}
+    </ul>
+    {{ else }}
+    <p class="rounded-lg border border-dashed border-slate-300 px-4 py-6 text-center text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">You have no passkeys yet.</p>
+    {{ end }}
+
+    {{ if .RecentAuth }}
+    <form class="stack" data-passkey-register data-begin="{{ basePath }}/profile/passkeys/register/begin" data-finish="{{ basePath }}/profile/passkeys/register/finish" hidden>
+        <div>
+            <label class="label" for="passkey_name">Name <span class="font-normal text-slate-500 dark:text-slate-400">(optional)</span></label>
+            <input class="input" id="passkey_name" name="name" type="text" maxlength="64" placeholder="e.g. MacBook, iPhone, YubiKey" aria-describedby="passkey_name_hint">
+            <p class="hint" id="passkey_name_hint">To recognize it in this list.</p>
+        </div>
+        <div class="alert-error" role="alert" data-passkey-error hidden></div>
+        <button class="btn-primary btn-block" type="submit">Add a passkey</button>
+    </form>
+    <div class="alert-warning" role="status" data-passkey-unsupported hidden>This browser does not support passkeys. Use a recent browser, on a secure (https) connection.</div>
+    <script src="{{ basePath }}/static/passkey.js" defer></script>
+    {{ end }}
+</div>
+{{ end }}

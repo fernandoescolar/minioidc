@@ -1,4 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useId, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
+import { ApiError } from '../api'
 
 // ---------- Modal ----------
 
@@ -142,9 +144,16 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 
 export const useToast = () => useContext(ToastContext)
 
+/** the login page, to come back to this page after a new login */
+export function reauthenticationURL() {
+  const page = window.location.pathname + window.location.hash
+  return new URL(`../login?return_url=${encodeURIComponent(page)}`, window.location.href).toString()
+}
+
 /** runs an action showing its result in a toast. Returns true if it succeeded */
 export function useAction() {
   const notify = useToast()
+  const confirm = useConfirm()
   return useCallback(
     async (action: () => Promise<unknown>, success?: string) => {
       try {
@@ -152,11 +161,23 @@ export function useAction() {
         if (success) notify('success', success)
         return true
       } catch (e) {
+        // the sensitive actions need a recent login
+        if (e instanceof ApiError && e.reauthenticate) {
+          const ok = await confirm({
+            title: 'Sign in again',
+            message:
+              'For your security, sign in again to change the credentials or the state of an account. You will come back to this page.',
+            confirmLabel: 'Sign in',
+          })
+          if (ok) window.location.assign(reauthenticationURL())
+          return false
+        }
+
         notify('error', e instanceof Error ? e.message : String(e))
         return false
       }
     },
-    [notify],
+    [notify, confirm],
   )
 }
 
@@ -228,6 +249,199 @@ export function SecretDialog({ clientId, secret, onClose }: { clientId: string; 
         </button>
       </div>
     </Modal>
+  )
+}
+
+/** a list of groups: chips, and a text field that suggests the existing groups */
+export function GroupPicker({
+  id,
+  value,
+  onChange,
+  suggestions,
+  placeholder,
+}: {
+  id: string
+  value: string[]
+  onChange: (value: string[]) => void
+  suggestions: string[]
+  placeholder?: string
+}) {
+  const [text, setText] = useState('')
+  const listId = useId()
+  const has = (name: string) => value.some((v) => v.toLowerCase() === name.toLowerCase())
+
+  const add = (name: string) => {
+    const group = name.trim()
+    setText('')
+    if (group && !has(group)) onChange([...value, group].sort((a, b) => a.localeCompare(b)))
+  }
+
+  return (
+    <div className="input flex flex-wrap items-center gap-1.5 py-1.5 focus-within:border-indigo-500 focus-within:ring-3 focus-within:ring-indigo-500/20">
+      {value.map((group) => (
+        <span key={group} className="badge gap-1 bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+          {group}
+          <button
+            type="button"
+            className="text-slate-500 hover:text-slate-900 dark:hover:text-white"
+            aria-label={`Remove ${group}`}
+            onClick={() => onChange(value.filter((v) => v !== group))}
+          >
+            ×
+          </button>
+        </span>
+      ))}
+      <input
+        id={id}
+        list={listId}
+        className="min-w-28 flex-1 bg-transparent py-0.5 outline-none"
+        value={text}
+        placeholder={value.length === 0 ? placeholder : ''}
+        onChange={(e) => {
+          // a suggestion chosen in the list is added at once
+          if (suggestions.includes(e.target.value)) add(e.target.value)
+          else setText(e.target.value)
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ',') {
+            e.preventDefault()
+            add(text)
+          } else if (e.key === 'Backspace' && text === '' && value.length > 0) {
+            onChange(value.slice(0, -1))
+          }
+        }}
+        onBlur={() => add(text)}
+      />
+      <datalist id={listId}>
+        {suggestions
+          .filter((s) => !has(s))
+          .map((s) => (
+            <option key={s} value={s} />
+          ))}
+      </datalist>
+    </div>
+  )
+}
+
+/** a value that can be copied (e.g. a generated password or link) */
+export function CopyField({ value, label }: { value: string; label: string }) {
+  const [copied, setCopied] = useState(false)
+  const copy = async () => {
+    await navigator.clipboard.writeText(value)
+    setCopied(true)
+  }
+
+  return (
+    <div className="flex gap-2">
+      <input className="input font-mono" readOnly value={value} onFocus={(e) => e.target.select()} aria-label={label} />
+      <button type="button" className="btn-secondary shrink-0" onClick={copy}>
+        {copied ? 'Copied' : 'Copy'}
+      </button>
+    </div>
+  )
+}
+
+export interface MenuItem {
+  label: string
+  onSelect: () => void
+  danger?: boolean
+  hidden?: boolean
+}
+
+const menuWidth = 208
+
+/** a button with a list of actions. The list is in a portal, so the scroll
+ * containers (e.g. the tables) do not cut it */
+export function Menu({ label, items }: { label: string; items: MenuItem[] }) {
+  const [position, setPosition] = useState<{
+    top: number
+    left: number
+  } | null>(null)
+  const button = useRef<HTMLButtonElement>(null)
+  const list = useRef<HTMLDivElement>(null)
+  const menuId = useId()
+  const open = position !== null
+
+  useEffect(() => {
+    if (!open) return
+    const close = () => setPosition(null)
+    const onClick = (e: MouseEvent) => {
+      const target = e.target as Node
+      if (!list.current?.contains(target) && !button.current?.contains(target)) close()
+    }
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && close()
+    document.addEventListener('mousedown', onClick)
+    document.addEventListener('keydown', onKey)
+    window.addEventListener('scroll', close, true)
+    window.addEventListener('resize', close)
+    list.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus()
+    return () => {
+      document.removeEventListener('mousedown', onClick)
+      document.removeEventListener('keydown', onKey)
+      window.removeEventListener('scroll', close, true)
+      window.removeEventListener('resize', close)
+    }
+  }, [open])
+
+  const visible = items.filter((item) => !item.hidden)
+  if (visible.length === 0) return null
+
+  const toggle = () => {
+    if (open || !button.current) {
+      setPosition(null)
+      return
+    }
+
+    // below the button, aligned to its right side; above it if there is no room
+    const rect = button.current.getBoundingClientRect()
+    const height = visible.length * 36 + 8
+    const top = rect.bottom + 4 + height > window.innerHeight ? Math.max(8, rect.top - 4 - height) : rect.bottom + 4
+    setPosition({ top, left: Math.max(8, rect.right - menuWidth) })
+  }
+
+  return (
+    <>
+      <button
+        ref={button}
+        type="button"
+        className="btn-ghost"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-controls={menuId}
+        onClick={toggle}
+      >
+        {label}
+        <span aria-hidden="true">▾</span>
+      </button>
+      {position &&
+        createPortal(
+          <div
+            ref={list}
+            id={menuId}
+            role="menu"
+            className="card fixed z-50 py-1 shadow-lg"
+            style={{ top: position.top, left: position.left, width: menuWidth }}
+          >
+            {visible.map((item) => (
+              <button
+                key={item.label}
+                type="button"
+                role="menuitem"
+                className={`block w-full px-3 py-2 text-left text-sm hover:bg-slate-100 dark:hover:bg-slate-800 ${
+                  item.danger ? 'text-red-600 dark:text-red-400' : ''
+                }`}
+                onClick={() => {
+                  setPosition(null)
+                  item.onSelect()
+                }}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>,
+          document.body,
+        )}
+    </>
   )
 }
 

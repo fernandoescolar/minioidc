@@ -8,13 +8,23 @@ import (
 	"github.com/fernandoescolar/minioidc/pkg/domain"
 )
 
-func contextWithAdmin(r *http.Request, user domain.User) context.Context {
-	return context.WithValue(r.Context(), adminUserKey, user)
+// contextWithAdmin keeps the session of the administrator
+func contextWithAdmin(r *http.Request, session domain.Session) context.Context {
+	return context.WithValue(r.Context(), adminUserKey, session)
 }
 
 func adminFromContext(r *http.Request) domain.User {
-	user, _ := r.Context().Value(adminUserKey).(domain.User)
-	return user
+	session := adminSessionFromContext(r)
+	if session == nil {
+		return nil
+	}
+
+	return session.User()
+}
+
+func adminSessionFromContext(r *http.Request) domain.Session {
+	session, _ := r.Context().Value(adminUserKey).(domain.Session)
+	return session
 }
 
 func sessionIDFromRequest(r *http.Request, masterKey string) string {

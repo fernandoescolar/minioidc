@@ -55,9 +55,13 @@ It also implements:
 - **LDAP Users Integration**: Use the users of an LDAP server to log in.
 - **LDAP server**: Serve the users as a read only LDAP directory, for the applications that only support LDAP.
 - **MFA**: Require MFA for all users using TOTP App (e.g. Google Authenticator).
-- **User profile**: The users change their password and manage their authenticator apps.
+- **Passkeys**: Sign in without a password with a passkey (WebAuthn): the fingerprint, face or screen lock of the device, or a security key. A passkey is also the second factor.
+- **User profile**: The users change their password and manage their authenticator apps and passkeys.
 - **Responsive pages**: The login, MFA, device and profile pages work on phones and computers, with light and dark modes. The templates can be customized with the components of the design system.
 - **Admin web**: Manage users, clients, sessions and tokens from a web served by minioidc, for the members of an admin group.
+- **Activity log**: The sign ins, the failed attempts, the changes of the accounts and the actions of the administrators, with filters and CSV export in the admin web.
+- **Groups and access control**: Manage the groups and their members, and restrict each client to some groups.
+- **Account management**: The administrators lock accounts for a while, disable them, and reset passwords with single use links or temporary passwords.
 - **Brute force protection**: Logins, MFA codes, LDAP binds, password grants and device user codes are blocked for 15 minutes after 5 failed attempts.
 - **Secure by Default**: Enable HTTP Strict Transport Security (HSTS), Content Security Policy (CSP), secure cookies, and more with a single configuration option.
 
@@ -79,7 +83,9 @@ The endpoints are published under the path of the issuer: if the issuer is `http
 | Device activation page | `/connect/device` |
 | Login page | `/login` |
 | MFA pages | `/mfa/create`, `/mfa/verify` |
-| User profile | `/profile`, `/profile/password`, `/profile/mfa` |
+| User profile | `/profile`, `/profile/password`, `/profile/mfa`, `/profile/passkeys` |
+| Passkey login (used by the login page) | `/passkey/login/begin`, `/passkey/login/finish` |
+| Password reset links | `/reset-password` |
 | Admin web (optional) | `/admin/` |
 | Health check | `/healthz` |
 
@@ -205,6 +211,10 @@ issuer: https://sso.example.com
 audience: https://sso.example.com
 require_mfa: true
 reuse_refresh_tokens: false
+passkeys:
+  enabled: true # default: true
+events:
+  retention_days: 90 # default: 90
 grants:
   implicit: false # the implicit and hybrid flows (discouraged)
   password: false # the resource owner password grant (discouraged)
@@ -256,6 +266,8 @@ templates:
   profile: templates/profile.html
   profile_password: templates/profile_password.html
   profile_mfa: templates/profile_mfa.html
+  profile_passkeys: templates/profile_passkeys.html
+  reset_password: templates/reset_password.html
   setup: templates/setup.html
 clients:
   - id: myclient
@@ -264,6 +276,8 @@ clients:
      - https://myapp.example.com/callback
     post_logout_redirect_uris:
      - https://myapp.example.com/
+    allowed_groups: # only these groups can sign in (default: all the users)
+     - staff
   - id: myspa
     token_endpoint_auth_method: none # public client: PKCE is required
     redirect_uris:
@@ -302,6 +316,8 @@ value2: $OTHER_ENV_VAR
 - `issuer` - The OIDC issuer: an `http(s)` URL without query or fragment. The endpoints are published under its path
 - `audience` - The audience of the access tokens (ID tokens use the client ID as audience)
 - `require_mfa` - Whether to require MFA for all users (default: `false`)
+- `events.retention_days` - How many days the activity log is kept (default: `90`). See [Activity log](#activity-log)
+- `passkeys.enabled` - Whether the users can sign in with passkeys (default: `true`). See [Passkeys](#passkeys)
 - `reuse_refresh_tokens` - Whether to allow re-use refresh tokens (default: `false`)
 - `grants.implicit` - Whether the clients with the `implicit` grant type can use the implicit and hybrid flows (default: `false`). They are discouraged by RFC 9700: the tokens are sent through the browser
 - `grants.password` - Whether the clients with the `password` grant type can use the resource owner password grant (default: `false`). It is discouraged by RFC 9700: the client sees the password of the user. The users with MFA write their TOTP code at the end of the password, and the failed attempts count as failed logins
@@ -329,7 +345,7 @@ value2: $OTHER_ENV_VAR
 - `filepath` - The path to the SQLite database file. It is mandatory if any `use_in_*` option is set to `true`. The database uses WAL mode, so the `-wal` and `-shm` files are created next to it. The tables are created and migrated on start up
 - `use_in_grants` - Whether to store the codes, refresh tokens and device codes in the database (default: `false`)
 - `use_in_sessions` - Whether to store the sessions in the database (default: `false`)
-- `use_in_mfa` - Whether to store the MFA secrets in the database (default: `false`)
+- `use_in_mfa` - Whether to store the MFA secrets and the passkeys in the database (default: `false`)
 - `use_in_users` - Whether to store the users in the database, so they can be managed from the admin web (default: `false`). It cannot be used with LDAP users
 - `use_in_clients` - Whether to store the clients in the database, so they can be managed from the admin web (default: `false`)
 - `use_in_client_assertions` - Whether to store the used `jti` of the `client_secret_jwt` and `private_key_jwt` assertions in the database (default: `false`). Enable it when several instances share the database, so an assertion used in one instance cannot be replayed in another one
@@ -389,7 +405,8 @@ ldap:
 - `logout` - The logout page template
 - `device` - The device activation page template
 - `error` - The error pages template (e.g. not found)
-- `profile`, `profile_password`, `profile_mfa` - The user profile page templates
+- `profile`, `profile_password`, `profile_mfa`, `profile_passkeys` - The user profile page templates
+- `reset_password` - The page of the password reset links
 - `setup` - The onboarding page template: the form of the first administrator and the next steps
 
 The paths are relative to the working directory: if a template does not exist, minioidc does not start.
@@ -401,7 +418,7 @@ The pages and the admin web share a design system built with [Tailwind CSS](http
 | Classes | Use |
 |---|---|
 | `page`, `page-brand`, `page-card`, `page-title`, `page-subtitle`, `page-footer` | The layout of `base.html`: a centered card |
-| `stack`, `menu`, `menu-item` | Vertical spacing and lists of options |
+| `stack`, `menu`, `menu-item`, `divider` | Vertical spacing, lists of options and separators ("or") |
 | `btn-primary`, `btn-secondary`, `btn-danger`, `btn-ghost`, `btn-block` | Buttons |
 | `label`, `input`, `code-input`, `hint` | Forms (`code-input` is the 6-digit code input) |
 | `alert-error`, `alert-success`, `alert-warning`, `alert-info` | Messages |
@@ -423,6 +440,7 @@ The OIDC clients. Each client has the following properties:
 - `secret` - The plain secret, only for `client_secret_jwt` (at least 32 characters). The assertions are signed with HMAC, so the server needs the secret itself: use an environment variable (e.g. `secret: ${MYCLIENT_SECRET}`)
 - `jwks_uri` - For `private_key_jwt`: the URL of the client JWKS. It is cached for 10 minutes and downloaded again when an assertion uses an unknown key (at most once per minute)
 - `public_key_paths` - For `private_key_jwt`: PEM files with the public keys (RSA, EC or Ed25519) or certificates of the client
+- `allowed_groups` - The groups whose members can sign in to the client (default: all the users). See [Groups](#groups)
 - `grant_types` - The grant types the client can use (default: `authorization_code` and `refresh_token`): `authorization_code`, `refresh_token`, `client_credentials` (confidential clients), `urn:ietf:params:oauth:grant-type:device_code`, `urn:ietf:params:oauth:grant-type:jwt-bearer` (with keys), `implicit` and `password` (these two also need the `grants` section)
 
 The JWT bearer grant (RFC 7523 section 2.1) lets a client get tokens of any user with an assertion signed with its own keys (`jwks_uri`, `public_key_paths` or the `client_secret_jwt` secret): `iss` is the client ID, `sub` the subject of the user, `aud` the issuer or the token endpoint URL, and it needs a unique `jti` and an `exp`. It issues no ID token (the user has not authenticated). Enable it only for trusted clients.
@@ -505,13 +523,121 @@ Only the members of the admin group can use it (with the MFA verified, if it is 
 
 From the admin web you can:
 
-- **Users**: create, edit and delete users, change their passwords and groups, see and close their sessions, reset their MFA and unblock them. The users of LDAP or of the configuration file (without `use_in_users`) are read only.
+- **Overview**: the dashboard. The users by state (administrators, with MFA or passkeys, disabled, locked, blocked, with a temporary password, never signed in), the sign ins, failures and blocks of the last 24 hours, and the last incidents. Each number opens the users or the events it counts.
+- **Users**: search the users by name, email or group, and filter them by state (disabled, locked, without MFA…), 50 per page. Each user has a page with tabs:
+  - **Profile**: the claims and the groups.
+  - **Security**: the state of the account (lock, disable), the password, the MFA and the passkeys.
+  - **Sessions**: the open sessions, to close them.
+  - **Activity**: the events of the user.
+
+  See [Account management](#account-management) for the passwords, locks and disabled accounts. The users of the configuration file (without `use_in_users`) are listed to manage their state and sessions, but their profile and password are changed in the configuration. The users of LDAP cannot be listed.
+- **Groups**: create, rename and delete groups and manage their members. See [Groups](#groups).
+- **Activity**: the activity log of the users and the administrators. See [Activity log](#activity-log).
 - **Clients**: create, edit and delete clients, rotate their secrets (the secrets are generated by the server and shown only once) and revoke their tokens.
-- **Maintenance**: purge the expired data and log out all the users.
+- **Settings**: edit the settings of the configuration file, see the server information, purge the expired data and log out all the users. See [Settings](#settings).
 
 A client of the configuration file deleted in the admin web is added again in the next start: remove it from the configuration file too.
 
 The admin web is in `web/admin` (TypeScript, React, Vite and Tailwind CSS) and it is embedded in the binary: run `make build-admin` before `make build` (the docker image builds it). Without it, `/admin/` shows how to build it. To develop it, run minioidc at `http://localhost:8000`, log in as an administrator and run `npm run dev` in `web/admin`: the API requests are proxied to minioidc.
+
+## Passkeys
+
+The users can sign in with a passkey instead of their password: the fingerprint, face or screen lock of their device (or a password manager that syncs them), or a security key.
+
+1. The user signs in with their password and adds a passkey in `<issuer>/profile/passkeys`.
+2. Next time, the login page offers "Sign in with a passkey", and the browser suggests the passkeys in the username field.
+
+The passkeys verify the user (biometrics or PIN), so they are also the second factor: with `require_mfa`, a login with a passkey does not ask for the TOTP code. The ID tokens have `"amr": ["hwk", "user", "mfa"]`.
+
+- **The domain of the issuer**: the passkeys are bound to the host of the issuer (the WebAuthn relying party). If the issuer changes its domain, the passkeys stop working.
+- **HTTPS**: the browsers only use passkeys in secure sites: an `https` issuer, or `http://localhost` to try it.
+- **Storage**: with `sqlite.use_in_mfa`, the passkeys are stored in the database. Otherwise they are kept in memory and lost in a restart.
+- **Security**: adding or removing a passkey requires a login in the last 10 minutes, so a stolen session cannot add its own passkey. The passkeys cannot be used in other sites (phishing), and a passkey whose signature counter goes back (a copy of it) is rejected. Each challenge can be used once and expires in 5 minutes, and the JSON endpoints of `static/passkey.js` require the `X-Minioidc-Passkey` header (CSRF protection).
+- **Passwords are still needed** for the LDAP server and the password grant, that cannot use passkeys.
+- **Lost devices**: the users remove their passkeys in their profile, and the administrators in the admin web (Users › Passkeys), one by one or all of them. The sessions started with a passkey are marked in the sessions of the user, and deleting a user deletes their passkeys.
+
+To disable them, set `passkeys.enabled: false`.
+
+## Settings
+
+The Settings page of the admin web edits the configuration file (`MINIOIDC_CONFIG`):
+
+| Group | Settings |
+|---|---|
+| General | `name` |
+| Security | `require_mfa`, `passkeys.enabled`, `grants.implicit`, `grants.password`, `reuse_refresh_tokens` |
+| Sessions and tokens | `ttl.access`, `ttl.refresh`, `ttl.session`, `ttl.code`, `ttl.csrf` |
+| Activity | `events.retention_days` |
+| HTTP | `middlewares.secure_cookies`, `middlewares.hsts`, `middlewares.csp`, `middlewares.forward_headers`, `middlewares.log_requests` |
+
+- **The changes apply when the server restarts.** The page shows the settings that are waiting for a restart, with the value that the server is using.
+- **The file keeps its comments, order and `${VARIABLES}`**: the server edits the YAML document, not the expanded values. The settings read from an environment variable cannot be changed in the web. The indentation of the lists can change.
+- **The previous file is kept** as `<file>.bak`, and the new one replaces it at once, so a failure does not leave a broken file. If the file has changed since the page was loaded (e.g. someone edited it by hand), the changes are rejected: reload the page.
+- **Some settings are only changed in the file**: the issuer, the audience, the keys, the admin group, the database and LDAP. Changing them can break the clients or the passkeys, or lock the administrators out. The page shows them with the server information (database, signing key, version…).
+- **HSTS and the secure cookies need an `https` issuer**: with an `http` one, nobody could sign in, so the web does not allow them.
+- Saving needs a recent login of the administrator, and the changes are in the [activity log](#activity-log) (`admin.settings`).
+
+The server needs write access to the file (and to its directory, for the backup). Otherwise, the page shows the settings as read only. Without a configuration file, the page shows the running settings and downloads a configuration file generated from them, to start using one.
+
+## Account management
+
+From the admin web (Users › More), the administrators manage the state and the password of the accounts:
+
+- **Lock**: the user cannot sign in for a while (1 hour, 24 hours, 7 days, until a date or until it is unlocked), and their sessions are closed. It is different from the automatic block of the failed attempts (15 minutes), and **Unlock** removes both.
+- **Disable**: the user cannot sign in until an administrator enables the account again. Their sessions are closed and their tokens stop working. The account and its data (MFA, passkeys) are kept.
+- **Password** (only with the users in SQLite):
+  - **Reset link**: a single use link to `<issuer>/reset-password`, valid for 24 hours, that the administrator gives to the user (there is no email). The administrator never knows the password. A new link replaces the previous one, and using it closes the sessions of the user.
+  - **Temporary password**: a random password, shown once, that the user must change in the next sign in.
+  - **Set a password**: the administrator chooses it, and optionally the user must change it in the next sign in.
+
+A locked or disabled account cannot be used by any way: the login page, the passkeys, the LDAP server, the password grant, the JWT bearer grant or the device flow. The disabled accounts are not in the LDAP directory either. The administrator can write a reason, that only the administrators see.
+
+A temporary password only works in the login page: the user has to choose a new password before using any application, and it is rejected by the LDAP server and the password grant. A login with a passkey does not use the password, so it does not ask to change it.
+
+To avoid mistakes and stolen sessions:
+
+- An administrator cannot lock or disable their own account.
+- Changing a password, locking, disabling or deleting an account requires a login of the administrator in the last 10 minutes: the admin web asks to sign in again.
+
+The state of the accounts is kept by subject in SQLite (when there is a database) or in memory, so it works with the users of SQLite, the configuration file and LDAP.
+
+## Groups
+
+The groups of a user are in their `groups` (the `groups` claim, with the `groups` scope). From the admin web (Groups), with the users in SQLite:
+
+- **Create** a group with a description, and **add or remove members** in bulk. In the user form, the groups are chosen from the existing ones (or a new one is written).
+- **Rename** a group: it is renamed in its members and in the allowed groups of the clients. The applications that check the old name in the `groups` claim stop recognizing it.
+- **Delete** a group: it is removed from its members. A group used by a client cannot be deleted, because a client without allowed groups is open to all the users: remove it from the client first.
+- The groups that the users have are listed even if they were not created in the admin web.
+- The admin group (`admin.group`) cannot be renamed or deleted, an administrator cannot remove themselves from it, and adding members to it requires a recent login.
+
+With the users in the configuration file or in LDAP, the groups are read only (LDAP: `ldap.attributes.groups`).
+
+### Access control by group
+
+A client can be restricted to some groups with `allowed_groups` (in the configuration or in the admin web): only their members can sign in to it. The other users get the error `access_denied` in the redirect to the client, and they cannot get tokens with the other grants either (password, device code, JWT bearer). If a user leaves the groups, their refresh tokens of the client stop working. In the device flow, the user is told in the device page and the device gets `access_denied`.
+
+The denied sign ins are in the [activity log](#activity-log) (`login.denied`). The group names are compared ignoring the case, and the LDAP groups can be written as their DN or their name (`admin` matches `cn=admin,ou=groups,dc=example,dc=com`).
+
+## Activity log
+
+minioidc keeps a log of what happens to the accounts, in the admin web (Activity):
+
+| Group | Events |
+|---|---|
+| Sign ins | With password, passkey, MFA code, LDAP bind and password grant, successful or failed (with the reason: invalid credentials, disabled, locked…), the automatic blocks after 5 failed attempts, and the users denied by the allowed groups of a client |
+| Sign outs | The logouts |
+| Account changes | Password changed or reset with a link, authenticator apps and passkeys added or removed, device sign ins approved or denied, and the setup |
+| Administration | Every change of an administrator: users, groups, passwords, locks, disabled accounts, sessions, MFA, passkeys, clients and maintenance, with who did it and the reason |
+
+Each event has the time, the user, the client, the IP (with `forward_headers`, the one of the proxy headers) and the user agent. The LDAP binds have no IP.
+
+- The page shows the sign ins, failed sign ins, blocks, account changes and admin actions of the last 24 hours: a click on the failures or the blocks shows them (the incidents).
+- The events can be filtered by text (user, administrator, client or IP), group, result and dates, and exported as CSV (up to 10,000 events).
+- The users list shows the last sign in of each user, and More › Activity shows their events, including the failed sign ins with their username (for them the user is not known).
+- The events are kept `events.retention_days` (default 90 days): they contain IP addresses, which are personal data. They are removed by the hourly cleanup.
+
+The log is stored in SQLite when there is a database; otherwise the last 10,000 events are kept in memory.
 
 ## Onboarding
 
@@ -586,7 +712,8 @@ The databases are migrated on start up, including the SQLite databases of all th
 - `phone_number` and `address` are returned with the `phone` and `address` scopes (not with `profile`), and `address` is a JSON object (`{"formatted": "..."}`).
 - The endpoints are published under the path of the issuer. The OAuth endpoints are under `/connect/` (`/connect/authorize`, `/connect/token`…, see [Endpoints](#endpoints)): the clients that use the discovery document are not affected.
 - The MFA enrollments with the SHA256 TOTP of previous versions keep working. The new ones use SHA1, supported by every authenticator app.
-- **Templates**: the pages have a new design and there is a new `error` template. The Content Security Policy does not allow inline scripts any more: if you have custom templates, move their scripts to files in `static/` and use `{{ basePath }}` in their URLs.
+- **Templates**: the pages have a new design and there are new `error`, `setup`, `profile_passkeys` and `reset_password` templates. The Content Security Policy does not allow inline scripts any more: if you have custom templates, move their scripts to files in `static/` and use `{{ basePath }}` in their URLs. To offer the passkeys in a custom login template, copy the `{{ if .Passkeys }}` block of `templates/login.html`.
+- **As a library**: the custom `SessionStore` implementations need the new `NewPasskeySession` method, and the custom `domain.Session` the `Passkey` method.
 
 ### From the versions with the Device Code and Password grants
 
@@ -715,7 +842,9 @@ go test ./tests/integration/...            # the end to end tests of the flows
 go test -race ./...                        # with the race detector
 ```
 
-The integration tests (`tests/integration`) run a server with all the grant types enabled and test the flows as a client. `pkg/api` has the end to end tests of the configuration features (SQLite, admin web, LDAP server, issuer path…).
+The integration tests (`tests/integration`) run a server with all the grant types enabled and test the flows as a client. `pkg/api` has the end to end tests of the configuration features (SQLite, admin web, LDAP server, issuer path, onboarding, passkeys…).
+
+The passkey tests (`pkg/api/passkey_test.go`) use a software authenticator that signs with an ECDSA key as a real passkey does, so the WebAuthn ceremonies run for real without a browser. To try the passkeys in a browser, run minioidc at `http://localhost:8000` (the browsers only allow `https` sites or `localhost`).
 
 ## Security
 
@@ -724,7 +853,7 @@ minioidc is intended for **small / home networks** and has not undergone a forma
 - Run it behind a TLS-terminating reverse proxy (nginx, Caddy, Traefik) and enable `secure_cookies`, `hsts` and `csp` (and `forward_headers`, so it knows the original scheme).
 - Use a strong, random `masterkey` (32+ characters) and keep it secret: it encrypts the cookies and the `client_secret_jwt` secrets.
 - Keep the RSA private key outside the repository and rotate it with `previous_rsa_key_paths`.
-- Enable MFA (`require_mfa`) and keep the discouraged grants (`grants`) disabled unless a client really needs them.
+- Enable MFA (`require_mfa`), recommend passkeys to the users, and keep the discouraged grants (`grants`) disabled unless a client really needs them.
 - Enable the JWT bearer grant only for trusted clients: they can get tokens of any user.
 - Use `ldaps` or `starttls` in the LDAP server unless the network is trusted.
 

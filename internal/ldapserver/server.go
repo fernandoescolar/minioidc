@@ -39,6 +39,8 @@ type Server struct {
 	now         func() time.Time
 	lister      domain.UserLister
 	credentials *credentials.Checker
+	states      domain.UserStateStore
+	events      *domain.Recorder
 	tlsConfig   *tls.Config
 
 	mu          sync.Mutex
@@ -78,11 +80,14 @@ func New(config *domain.Config, now func() time.Time) (*Server, error) {
 		usersDN: usersDN,
 		now:     now,
 		lister:  lister,
+		states:  config.UserStateStore,
+		events:  &domain.Recorder{Store: config.EventStore, Now: now},
 		credentials: &credentials.Checker{
 			Users:      config.UserStore,
 			MFA:        config.MFACodeStore,
 			Blocked:    config.UserBlockedStore,
 			RequireMFA: config.RequireMFA,
+			States:     config.UserStateStore,
 		},
 		connections: map[int]*connection{},
 	}
@@ -301,8 +306,18 @@ func (s *Server) username(name string) (string, bool) {
 // authenticate checks the password (and the TOTP code at its end, when the
 // user has MFA) with the same brute force protection of the login page
 func (s *Server) authenticate(username, password string) bool {
-	_, _, err := s.credentials.Authenticate(username, password, s.now())
-	return err == nil
+	user, _, err := s.credentials.Authenticate(username, password, s.now())
+	if err != nil {
+		// gldap does not give the address of the client
+		s.events.Record(nil, domain.Event{Type: domain.EventLoginLDAP, Result: domain.ResultFailure, Username: username, Detail: err.Error()})
+		if errors.Is(err, credentials.ErrLockout) {
+			s.events.Record(nil, domain.Event{Type: domain.EventLoginLockout, Result: domain.ResultFailure, Username: username, Detail: "the LDAP server"})
+		}
+		return false
+	}
+
+	s.events.RecordUser(nil, domain.EventLoginLDAP, domain.ResultSuccess, user, "")
+	return true
 }
 
 // ---------- Search ----------
@@ -352,7 +367,15 @@ func (s *Server) search(w *gldap.ResponseWriter, r *gldap.Request) {
 		return
 	}
 
-	dir := buildDirectory(s.config.BaseDN, users)
+	// the disabled accounts are not in the directory
+	active := users[:0]
+	for _, u := range users {
+		if state, err := s.states.GetUserState(u.Subject); err == nil && !state.Disabled {
+			active = append(active, u)
+		}
+	}
+
+	dir := buildDirectory(s.config.BaseDN, active)
 	if !dir.exists(base) {
 		done.SetResultCode(gldap.ResultNoSuchObject)
 		done.SetMatchedDN(s.config.BaseDN)

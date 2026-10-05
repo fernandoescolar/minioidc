@@ -22,6 +22,7 @@ type LogoutHandler struct {
 	keypair       *cryptography.Keypair
 	clientStore   domain.ClientStore
 	sessionStore  domain.SessionStore
+	events        *domain.Recorder
 	template      *template.Template
 }
 
@@ -48,6 +49,7 @@ func NewLogoutHandler(config *domain.Config, now func() time.Time) *LogoutHandle
 		keypair:       config.Keypair,
 		clientStore:   config.ClientStore,
 		sessionStore:  config.SessionStore,
+		events:        config.Events,
 		template:      utils.ParseTemplates(config.BasePath, config.BaseTemplateFilepath, config.LogoutTemplateFilepath),
 	}
 }
@@ -98,6 +100,9 @@ func (h *LogoutHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if sessionID != "" {
+		if session, err := h.sessionStore.GetSessionByID(sessionID); err == nil {
+			h.events.RecordUser(r, domain.EventLogout, domain.ResultSuccess, session.User(), "")
+		}
 		_ = h.sessionStore.DeleteSession(sessionID)
 	}
 	utils.ClearSessionCookie(w, h.secureCookies)

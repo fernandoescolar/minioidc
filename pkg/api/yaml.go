@@ -55,7 +55,19 @@ type YamlConfig struct {
 		ProfilePassword string `yaml:"profile_password"`
 		ProfileMFA      string `yaml:"profile_mfa"`
 		Setup           string `yaml:"setup"`
+		ProfilePasskeys string `yaml:"profile_passkeys"`
+		ResetPassword   string `yaml:"reset_password"`
 	} `yaml:"templates"`
+
+	Events struct {
+		// RetentionDays is how long the activity log is kept (default 90)
+		RetentionDays int `yaml:"retention_days"`
+	} `yaml:"events"`
+
+	Passkeys struct {
+		// Enabled is true by default
+		Enabled *bool `yaml:"enabled"`
+	} `yaml:"passkeys"`
 
 	Sqlite struct {
 		Filepath              string `yaml:"filepath"`
@@ -115,6 +127,7 @@ type YamlConfig struct {
 		JWKSURI                 string   `yaml:"jwks_uri"`
 		PublicKeyPaths          []string `yaml:"public_key_paths"`
 		GrantTypes              []string `yaml:"grant_types"`
+		AllowedGroups           []string `yaml:"allowed_groups"`
 	} `yaml:"clients"`
 
 	Users []struct {
@@ -186,6 +199,7 @@ func NewYamlBuilder(filepath string) (*Builder, error) {
 			JWKSURI:                 c.JWKSURI,
 			PublicKeyPaths:          c.PublicKeyPaths,
 			GrantTypes:              c.GrantTypes,
+			AllowedGroups:           c.AllowedGroups,
 		}
 	}
 
@@ -208,6 +222,7 @@ func NewYamlBuilder(filepath string) (*Builder, error) {
 
 	builder := &Builder{
 		Name:                    yamlConfig.Name,
+		ConfigFilepath:          filepath,
 		MasterKey:               yamlConfig.MasterKey,
 		Issuer:                  yamlConfig.Issuer,
 		Audience:                yamlConfig.Audience,
@@ -235,6 +250,10 @@ func NewYamlBuilder(filepath string) (*Builder, error) {
 		ProfilePasswordTemplateFilepath: yamlConfig.Templates.ProfilePassword,
 		ProfileMFATemplateFilepath:      yamlConfig.Templates.ProfileMFA,
 		SetupTemplateFilepath:           yamlConfig.Templates.Setup,
+		ProfilePasskeysTemplateFilepath: yamlConfig.Templates.ProfilePasskeys,
+		ResetPasswordTemplateFilepath:   yamlConfig.Templates.ResetPassword,
+		DisablePasskeys:                 yamlConfig.Passkeys.Enabled != nil && !*yamlConfig.Passkeys.Enabled,
+		EventRetention:                  time.Duration(yamlConfig.Events.RetentionDays) * 24 * time.Hour,
 		AllowImplicitFlow:               yamlConfig.Grants.Implicit,
 		AllowPasswordGrant:              yamlConfig.Grants.Password,
 

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"html/template"
 	"net/http"
 	"strings"
@@ -19,12 +20,15 @@ type LoginHandler struct {
 	sessionStore  domain.SessionStore
 	userStore     domain.UserStore
 	userBlocked   domain.UserBlockedStore
+	userStates    domain.UserStateStore
+	events        *domain.Recorder
 	masterKey     string
 	requireMFA    bool
 	secureCookies bool
 	home          string
 	setup         *SetupHandler
 	setupURL      string
+	passkeys      bool
 }
 
 type loginModel struct {
@@ -34,7 +38,13 @@ type loginModel struct {
 	TooManyAttempts bool
 	UnknownError    bool
 	FormExpired     bool
-	CSRF            string
+	AccountDisabled bool
+	AccountLocked   bool
+	// PasswordReset is true after the reset of the password with a link
+	PasswordReset bool
+	CSRF          string
+	// Passkeys shows the login with a passkey
+	Passkeys bool
 }
 
 var _ http.Handler = (*LoginHandler)(nil)
@@ -50,12 +60,15 @@ func NewLoginHandler(config *domain.Config, now func() time.Time, setup *SetupHa
 		sessionStore:  config.SessionStore,
 		userStore:     config.UserStore,
 		userBlocked:   config.UserBlockedStore,
+		userStates:    config.UserStateStore,
+		events:        config.Events,
 		masterKey:     config.MasterKey,
 		requireMFA:    config.RequireMFA,
 		secureCookies: config.UseSecureCookie,
 		home:          config.BasePath + "/",
 		setup:         setup,
 		setupURL:      setupURL,
+		passkeys:      config.PasskeysEnabled,
 	}
 }
 
@@ -67,7 +80,7 @@ func (h *LoginHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodGet:
-		h.render(w, loginModel{CSRF: utils.GetCSRFToken(r), Username: loginHint(r)})
+		h.render(w, loginModel{CSRF: utils.GetCSRFToken(r), Username: loginHint(r), PasswordReset: r.URL.Query().Has("reset")})
 	case http.MethodPost:
 		h.postHTTP(w, r)
 	default:
@@ -91,6 +104,7 @@ func (h *LoginHandler) postHTTP(w http.ResponseWriter, r *http.Request) {
 	// reveal which users exist either.
 	blockKey := "login:" + strings.ToLower(username)
 	if h.userBlocked.IsBlocked(blockKey, now) {
+		h.failure(r, username, "blocked: too many failed attempts")
 		model.TooManyAttempts = true
 		h.render(w, model)
 		return
@@ -106,11 +120,31 @@ func (h *LoginHandler) postHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		model.TooManyAttempts = h.userBlocked.AddFailedAttempt(blockKey, now)
 		model.InvalidLogin = !model.TooManyAttempts
+		h.failure(r, username, "invalid credentials")
+		if model.TooManyAttempts {
+			h.events.Record(r, domain.Event{Type: domain.EventLoginLockout, Result: domain.ResultFailure, Username: username, Detail: "the login page"})
+		}
 		h.render(w, model)
 		return
 	}
 
 	h.userBlocked.Reset(blockKey)
+
+	// the state is checked after the password: it does not reveal anything
+	// to who does not know it
+	state, err := h.userStates.GetUserState(user.ID())
+	if err != nil {
+		model.UnknownError = true
+		h.render(w, model)
+		return
+	}
+	if err := state.CanSignIn(now); err != nil {
+		model.AccountDisabled = errors.Is(err, domain.ErrAccountDisabled)
+		model.AccountLocked = errors.Is(err, domain.ErrAccountLocked)
+		h.events.RecordUser(r, domain.EventLoginPassword, domain.ResultFailure, user, err.Error())
+		h.render(w, model)
+		return
+	}
 
 	expiresAt := now.Add(h.sessionTTL)
 	session, err := h.sessionStore.NewSession(stores.CreateUID(), user, now, expiresAt, h.requireMFA)
@@ -126,7 +160,13 @@ func (h *LoginHandler) postHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.events.RecordUser(r, domain.EventLoginPassword, domain.ResultSuccess, user, "")
 	http.Redirect(w, r, utils.GetReturnURL(r, h.home), http.StatusFound)
+}
+
+// failure records a failed login: the user can be unknown
+func (h *LoginHandler) failure(r *http.Request, username, detail string) {
+	h.events.Record(r, domain.Event{Type: domain.EventLoginPassword, Result: domain.ResultFailure, Username: username, Detail: detail})
 }
 
 // loginHint returns the login_hint parameter (OIDC Core section 3.1.2.1) to prefill the username
@@ -146,5 +186,6 @@ func (h *LoginHandler) render(w http.ResponseWriter, model loginModel) {
 
 func (h *LoginHandler) renderStatus(w http.ResponseWriter, status int, model loginModel) {
 	model.Name = h.name
+	model.Passkeys = h.passkeys
 	utils.RenderTemplateStatus(w, status, h.template, model)
 }

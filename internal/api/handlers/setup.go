@@ -30,6 +30,7 @@ type SetupHandler struct {
 	template      *template.Template
 	users         domain.UserAdminStore
 	mfaStore      domain.MFACodeStore
+	events        *domain.Recorder
 	sessionStore  domain.SessionStore
 	sessionTTL    time.Duration
 	masterKey     string
@@ -37,6 +38,7 @@ type SetupHandler struct {
 	secureCookies bool
 	adminGroup    string
 	adminURL      string
+	passkeys      bool
 	issuer        string
 	home          string
 	loginURL      string
@@ -71,6 +73,7 @@ type setupModel struct {
 	DiscoveryURL string
 	AdminURL     string
 	HasMFA       bool
+	Passkeys     bool
 }
 
 var _ http.Handler = (*SetupHandler)(nil)
@@ -83,12 +86,14 @@ func NewSetupHandler(config *domain.Config, now func() time.Time, setupURL, logi
 		now:           now,
 		template:      utils.ParseTemplates(config.BasePath, config.BaseTemplateFilepath, config.SetupTemplateFilepath),
 		mfaStore:      config.MFACodeStore,
+		events:        config.Events,
 		sessionStore:  config.SessionStore,
 		sessionTTL:    config.SessionTTL,
 		masterKey:     config.MasterKey,
 		requireMFA:    config.RequireMFA,
 		secureCookies: config.UseSecureCookie,
 		adminGroup:    config.AdminGroup,
+		passkeys:      config.PasskeysEnabled,
 		issuer:        config.Issuer,
 		home:          config.BasePath + "/",
 		loginURL:      loginURL,
@@ -180,6 +185,9 @@ func (h *SetupHandler) postHTTP(w http.ResponseWriter, r *http.Request) {
 	case password != r.PostFormValue("confirm_password"):
 		model.PasswordMismatch = true
 	}
+	if model.InvalidCode {
+		h.events.Record(r, domain.Event{Type: domain.EventSetup, Result: domain.ResultFailure, Username: model.Username, Detail: "invalid setup code"})
+	}
 	if model.InvalidCode || model.MissingUsername || model.WeakPassword || model.PasswordMismatch {
 		h.render(w, http.StatusOK, model)
 		return
@@ -211,6 +219,8 @@ func (h *SetupHandler) postHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.events.RecordUser(r, domain.EventSetup, domain.ResultSuccess, user, "the first administrator")
+
 	// the administrator is signed in, as after the login
 	now := h.now()
 	expiresAt := now.Add(h.sessionTTL)
@@ -223,6 +233,8 @@ func (h *SetupHandler) postHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, h.loginURL, http.StatusFound)
 		return
 	}
+
+	h.events.RecordUser(r, domain.EventLoginPassword, domain.ResultSuccess, user, "after the setup")
 
 	http.Redirect(w, r, h.welcomeURL, http.StatusFound)
 }
@@ -276,6 +288,7 @@ func (h *SetupHandler) Welcome() http.Handler {
 			DiscoveryURL: strings.TrimSuffix(h.issuer, "/") + "/.well-known/openid-configuration",
 			AdminURL:     h.adminURL,
 			HasMFA:       hasMFA,
+			Passkeys:     h.passkeys,
 		})
 	})
 }

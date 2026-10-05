@@ -27,9 +27,26 @@ func (h *TokenHandler) requestWithPassword(w http.ResponseWriter, r *http.Reques
 	}
 
 	now := h.now()
-	user, mfaVerified, err := h.credentials.Authenticate(r.PostForm.Get("username"), r.PostForm.Get("password"), now)
-	if errors.Is(err, credentials.ErrBlocked) {
+	username := r.PostForm.Get("username")
+	user, mfaVerified, err := h.credentials.Authenticate(username, r.PostForm.Get("password"), now)
+	if err != nil {
+		h.events.Record(r, domain.Event{Type: domain.EventLoginPasswordGrant, Result: domain.ResultFailure, Username: username, ClientID: client.ClientID(), Detail: err.Error()})
+		if errors.Is(err, credentials.ErrLockout) {
+			h.events.Record(r, domain.Event{Type: domain.EventLoginLockout, Result: domain.ResultFailure, Username: username, ClientID: client.ClientID(), Detail: "the password grant"})
+		}
+	}
+	switch {
+	case errors.Is(err, credentials.ErrBlocked):
 		utils.Error(w, utils.InvalidGrant, "Too many failed attempts. Try it again later", http.StatusBadRequest)
+		return
+	case errors.Is(err, domain.ErrAccountDisabled):
+		utils.Error(w, utils.InvalidGrant, "The account is disabled", http.StatusBadRequest)
+		return
+	case errors.Is(err, domain.ErrAccountLocked):
+		utils.Error(w, utils.InvalidGrant, "The account is locked", http.StatusBadRequest)
+		return
+	case errors.Is(err, domain.ErrPasswordChangeRequired):
+		utils.Error(w, utils.InvalidGrant, "The password must be changed in the login page", http.StatusBadRequest)
 		return
 	}
 	if err != nil {
@@ -37,5 +54,9 @@ func (h *TokenHandler) requestWithPassword(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	h.events.Record(r, domain.Event{
+		Type: domain.EventLoginPasswordGrant, Result: domain.ResultSuccess, UserID: user.ID(),
+		Username: user.Data().PreferredUsername, ClientID: client.ClientID(),
+	})
 	h.issueForUser(w, client, user, scopes, now, mfaVerified, true)
 }

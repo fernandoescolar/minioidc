@@ -89,6 +89,10 @@ func (m *Minioidc) CleanExpired() {
 	m.config.UserBlockedStore.CleanExpired(m.Now())
 	m.config.ClientAssertionStore.CleanExpired(m.Now())
 	m.config.DeviceCodeStore.CleanExpired(m.Now())
+	m.config.PasswordResetStore.CleanExpired(m.Now())
+	if err := m.config.EventStore.DeleteEventsBefore(m.Now().Add(-m.config.EventRetention)); err != nil {
+		log.Printf("CleanExpired: activity log: %v", err)
+	}
 	log.Println("CleanExpired: Expired sessions and grants have been removed")
 }
 

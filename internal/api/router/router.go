@@ -9,6 +9,7 @@ import (
 	"github.com/fernandoescolar/minioidc/internal/api/handlers"
 	"github.com/fernandoescolar/minioidc/internal/api/middlewares"
 	"github.com/fernandoescolar/minioidc/internal/clientauth"
+	"github.com/fernandoescolar/minioidc/internal/passkeys"
 	"github.com/fernandoescolar/minioidc/pkg/domain"
 )
 
@@ -36,8 +37,15 @@ const (
 	ProfileEndpoint             = "/profile"
 	ProfilePasswordEndpoint     = ProfileEndpoint + "/password"
 	ProfileMFAEndpoint          = ProfileEndpoint + "/mfa"
+	ProfilePasskeysEndpoint     = ProfileEndpoint + "/passkeys"
+	PasskeyRegisterBegin        = ProfilePasskeysEndpoint + "/register/begin"
+	PasskeyRegisterFinish       = ProfilePasskeysEndpoint + "/register/finish"
+	PasskeyEndpoint             = "/passkey/"
+	PasskeyLoginBegin           = PasskeyEndpoint + "login/begin"
+	PasskeyLoginFinish          = PasskeyEndpoint + "login/finish"
 	HealthEndpoint              = "/healthz"
 	SetupEndpoint               = "/setup"
+	ResetPasswordEndpoint       = "/reset-password"
 	WelcomeEndpoint             = "/welcome"
 	AdminEndpoint               = "/admin"
 	AdminAPIEndpoint            = AdminEndpoint + "/api/"
@@ -48,6 +56,8 @@ const (
 // (e.g. https://host/auth/token when the issuer is https://host/auth)
 func CreateMinioidcRoutes(mux *http.ServeMux, config *domain.Config, now func() time.Time) http.Handler {
 	base := config.BasePath
+	// the activity log uses the clock of the server
+	config.Events = &domain.Recorder{Store: config.EventStore, Now: now}
 	path := func(endpoint string) string { return base + endpoint }
 	// the absolute URL of an endpoint (the issuer already has the base path)
 	endpointURL := func(endpoint string) string { return strings.TrimSuffix(config.Issuer, "/") + endpoint }
@@ -66,11 +76,12 @@ func CreateMinioidcRoutes(mux *http.ServeMux, config *domain.Config, now func() 
 	sessionMiddleware := middlewares.NewSessionAuthorized(config, now, path(LoginEndpoint), []string{
 		path(WellKnownEndpoint), path(AuthorizationEndpoint), path(TokenEndpoint), path(UserinfoEndpoint), path(RevokeEndpoint), path(IntrospectionEndpoint),
 		path(DeviceAuthorizationEndpoint), path(StaticEndpoint), path(LoginEndpoint), path(EndSessionEndpoint), path(HealthEndpoint),
-		path(SetupEndpoint),
+		path(SetupEndpoint), path(PasskeyEndpoint), path(ResetPasswordEndpoint),
 		// the admin API answers with JSON errors instead of redirecting to the login
 		path(AdminAPIEndpoint),
 	})
 	sessionMFARequired := middlewares.NewSessionMFARequired(config, path(MFACreateEndpoint), path(MFAVerifyEndpoint))
+	accountState := middlewares.NewAccountState(config, now, path(LoginEndpoint), path(ProfilePasswordEndpoint), []string{path(MFAEnpoint)})
 	updateSessionTTL := middlewares.NewUpdateSessionTTL(config, now)
 
 	// the discovery document builds the URLs from the issuer, that already has the base path
@@ -87,7 +98,7 @@ func CreateMinioidcRoutes(mux *http.ServeMux, config *domain.Config, now func() 
 
 	mux.Handle(path(DiscoveryEndpoint), discoveryHandler)
 	mux.Handle(path(JWKSEndpoint), handlers.NewJWKSHandler(config))
-	mux.Handle(path(AuthorizationEndpoint), handlers.NewAuthorizeHandler(config, now, path(LoginEndpoint), path(MFAVerifyEndpoint)))
+	mux.Handle(path(AuthorizationEndpoint), handlers.NewAuthorizeHandler(config, now, path(LoginEndpoint), path(MFAVerifyEndpoint), path(ProfilePasswordEndpoint)))
 	mux.Handle(path(TokenEndpoint), handlers.NewTokenHandler(config, now, authenticator, endpointURL(TokenEndpoint)))
 	mux.Handle(path(UserinfoEndpoint), handlers.NewUserinfoHandler(config, now))
 	mux.Handle(path(RevokeEndpoint), handlers.NewRevokeHandler(config, now, authenticator, endpointURL(RevokeEndpoint)))
@@ -95,8 +106,24 @@ func CreateMinioidcRoutes(mux *http.ServeMux, config *domain.Config, now func() 
 	// the onboarding, while there are no users
 	setupHandler := handlers.NewSetupHandler(config, now, endpointURL(SetupEndpoint), path(LoginEndpoint), path(WelcomeEndpoint))
 	mux.Handle(path(SetupEndpoint), setupHandler)
+	mux.Handle(path(ResetPasswordEndpoint), handlers.NewResetPasswordHandler(config, now, path(LoginEndpoint)))
 	mux.Handle(path(WelcomeEndpoint), setupHandler.Welcome())
 	mux.Handle(path(LoginEndpoint), handlers.NewLoginHandler(config, now, setupHandler, path(SetupEndpoint)))
+	if config.PasskeysEnabled {
+		service, err := passkeys.New(config, now)
+		if err != nil {
+			// the builder validates the issuer
+			panic(err)
+		}
+
+		passkeyLogin := handlers.NewPasskeyLoginHandler(config, now, service)
+		mux.Handle(path(PasskeyLoginBegin), passkeyLogin.Begin())
+		mux.Handle(path(PasskeyLoginFinish), passkeyLogin.Finish())
+		profilePasskeys := handlers.NewProfilePasskeysHandler(config, now, service, path(ProfilePasskeysEndpoint), path(LoginEndpoint))
+		mux.Handle(path(ProfilePasskeysEndpoint), profilePasskeys)
+		mux.Handle(path(PasskeyRegisterBegin), profilePasskeys.RegisterBegin())
+		mux.Handle(path(PasskeyRegisterFinish), profilePasskeys.RegisterFinish())
+	}
 	mux.Handle(path(EndSessionEndpoint), handlers.NewLogoutHandler(config, now))
 	mux.Handle(path(DeviceAuthorizationEndpoint), handlers.NewDeviceAuthorizationHandler(config, now, authenticator, endpointURL(DeviceAuthorizationEndpoint), endpointURL(DeviceEndpoint)))
 	mux.Handle(path(DeviceEndpoint), handlers.NewDeviceHandler(config, now))
@@ -127,6 +154,7 @@ func CreateMinioidcRoutes(mux *http.ServeMux, config *domain.Config, now func() 
 		csrfMiddleware,
 		sessionMiddleware,
 		sessionMFARequired,
+		accountState,
 		updateSessionTTL)
 }
 

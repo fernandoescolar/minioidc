@@ -24,7 +24,7 @@ export function MaintenancePage() {
     <section className="grid gap-4 md:grid-cols-2">
       <Task
         title="Purge expired data"
-        description="Deletes the expired sessions, codes, refresh tokens, device codes, login blocks and client assertions. It also runs every hour."
+        description="Deletes the expired sessions, codes, refresh tokens, device codes, login blocks, client assertions and password reset links, and the activity older than its retention. It also runs every hour."
         action={
           <button type="button" className="btn-primary" onClick={purge}>
             Purge now

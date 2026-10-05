@@ -32,7 +32,12 @@ const (
 )
 
 type Builder struct {
-	Name               string
+	Name string
+	// ConfigFilepath is the configuration file of the builder (NewYamlBuilder):
+	// the admin web edits it
+	ConfigFilepath string
+	// DataDir is the data directory of the default configuration (NewDefaultBuilder)
+	DataDir            string
 	MasterKey          string
 	Issuer             string
 	Audience           string
@@ -72,6 +77,12 @@ type Builder struct {
 	ProfilePasswordTemplateFilepath string
 	ProfileMFATemplateFilepath      string
 	SetupTemplateFilepath           string
+	ProfilePasskeysTemplateFilepath string
+	ResetPasswordTemplateFilepath   string
+
+	// DisablePasskeys disables the login with passkeys (WebAuthn). The passkeys
+	// work with an https issuer (or http://localhost), and only in its domain.
+	DisablePasskeys bool
 
 	// SetupCode is the code to create the first administrator when the users
 	// are in SQLite and there are none. Empty to generate a random one, that is
@@ -84,6 +95,18 @@ type Builder struct {
 	UserStore        domain.UserStore
 	UserBlockedStore domain.UserBlockedStore
 	MFACodeStore     domain.MFACodeStore
+	// PasskeyStore keeps the passkeys (they are stored in SQLite with the MFA)
+	PasskeyStore domain.PasskeyStore
+	// UserStateStore keeps the state of the accounts (in SQLite if there is a database)
+	UserStateStore domain.UserStateStore
+	// PasswordResetStore keeps the reset links (in SQLite with the users)
+	PasswordResetStore domain.PasswordResetStore
+	// GroupStore keeps the descriptions of the groups (in SQLite if there is a database)
+	GroupStore domain.GroupStore
+	// EventStore keeps the activity log (in SQLite if there is a database)
+	EventStore domain.EventStore
+	// EventRetention is how long the events are kept (default 90 days)
+	EventRetention time.Duration
 	// ClientAssertionStore keeps the used jti of the client assertions
 	ClientAssertionStore domain.ClientAssertionStore
 	DeviceCodeStore      domain.DeviceCodeStore
@@ -151,6 +174,8 @@ type Client struct {
 	PublicKeys     []crypto.PublicKey
 	// GrantTypes are the grant types the client can use (default: authorization_code and refresh_token)
 	GrantTypes []string
+	// AllowedGroups are the groups whose members can use the client (default: all the users)
+	AllowedGroups []string
 }
 
 type User struct {
@@ -278,6 +303,9 @@ func (b *Builder) validate() error {
 			return errors.New("the admin web requires the clients in sqlite (use_in_clients)")
 		}
 	}
+	if b.sqliteUseInMFA && b.PasskeyStore != nil {
+		return errors.New("sqlite mfa store and passkey store are mutually exclusive")
+	}
 	if b.sqliteUseInClientAssertions && b.ClientAssertionStore != nil {
 		return errors.New("sqlite client assertion store and client assertion store are mutually exclusive")
 	}
@@ -313,6 +341,8 @@ const (
 	defaultCodeTTL    = 5
 	defaultCSRFTTL    = 5
 	defaultRSASize    = 2048
+	// defaultEventRetention keeps the activity log for 90 days
+	defaultEventRetention = 90 * 24 * time.Hour
 	// minSetupCodeLength is the minimum length of a configured setup code
 	minSetupCodeLength = 12
 )
@@ -370,6 +400,9 @@ func (b *Builder) assignDefaults() error {
 	if b.AdminGroup == "" {
 		b.AdminGroup = "admin"
 	}
+	if b.EventRetention == 0 {
+		b.EventRetention = defaultEventRetention
+	}
 	if b.LogoutTemplateFilepath == "" {
 		b.LogoutTemplateFilepath = "templates/logout.html"
 	}
@@ -391,6 +424,12 @@ func (b *Builder) assignDefaults() error {
 	if b.SetupTemplateFilepath == "" {
 		b.SetupTemplateFilepath = "templates/setup.html"
 	}
+	if b.ProfilePasskeysTemplateFilepath == "" {
+		b.ProfilePasskeysTemplateFilepath = "templates/profile_passkeys.html"
+	}
+	if b.ResetPasswordTemplateFilepath == "" {
+		b.ResetPasswordTemplateFilepath = "templates/reset_password.html"
+	}
 
 	return nil
 }
@@ -403,6 +442,9 @@ func (b *Builder) config() (*domain.Config, error) {
 
 	config := &domain.Config{
 		Name:               b.Name,
+		ConfigFilepath:     b.ConfigFilepath,
+		DataDir:            b.DataDir,
+		SqliteFilepath:     b.sqliteFilepath,
 		MasterKey:          b.MasterKey,
 		Issuer:             b.Issuer,
 		BasePath:           basePath,
@@ -433,14 +475,18 @@ func (b *Builder) config() (*domain.Config, error) {
 		ProfilePasswordTemplateFilepath: b.ProfilePasswordTemplateFilepath,
 		ProfileMFATemplateFilepath:      b.ProfileMFATemplateFilepath,
 		SetupTemplateFilepath:           b.SetupTemplateFilepath,
+		ProfilePasskeysTemplateFilepath: b.ProfilePasskeysTemplateFilepath,
+		ResetPasswordTemplateFilepath:   b.ResetPasswordTemplateFilepath,
+		PasskeysEnabled:                 !b.DisablePasskeys,
 		SetupCode:                       b.SetupCode,
 
 		AllowImplicitFlow:  b.AllowImplicitFlow,
 		AllowPasswordGrant: b.AllowPasswordGrant,
 
-		AdminEnabled: b.AdminEnabled,
-		AdminGroup:   b.AdminGroup,
-		LDAPServer:   b.LDAPServer,
+		AdminEnabled:   b.AdminEnabled,
+		AdminGroup:     b.AdminGroup,
+		EventRetention: b.EventRetention,
+		LDAPServer:     b.LDAPServer,
 	}
 
 	if err := b.assignPrivateKey(config); err != nil {
@@ -565,6 +611,54 @@ func (b *Builder) assignStores(config *domain.Config) error {
 	config.SessionStore = sessionStore
 	config.UserStore = userStore
 	config.MFACodeStore = mfaStore
+
+	// the state of the accounts works with any user store: it is kept in the
+	// database if there is one
+	switch {
+	case b.UserStateStore != nil:
+		config.UserStateStore = b.UserStateStore
+	case sqlite != nil:
+		config.UserStateStore = stores.NewSqliteUserStateStore(sqlite)
+	default:
+		config.UserStateStore = stores.NewUserStateStore()
+	}
+
+	switch {
+	case b.GroupStore != nil:
+		config.GroupStore = b.GroupStore
+	case sqlite != nil:
+		config.GroupStore = stores.NewSqliteGroupStore(sqlite)
+	default:
+		config.GroupStore = stores.NewGroupStore()
+	}
+
+	switch {
+	case b.EventStore != nil:
+		config.EventStore = b.EventStore
+	case sqlite != nil:
+		config.EventStore = stores.NewSqliteEventStore(sqlite)
+	default:
+		config.EventStore = stores.NewEventStore()
+	}
+
+	switch {
+	case b.PasswordResetStore != nil:
+		config.PasswordResetStore = b.PasswordResetStore
+	case b.sqliteUseInUsers:
+		config.PasswordResetStore = stores.NewSqlitePasswordResetStore(sqlite)
+	default:
+		config.PasswordResetStore = stores.NewPasswordResetStore()
+	}
+
+	// the passkeys are authenticators, like the MFA codes
+	switch {
+	case b.sqliteUseInMFA:
+		config.PasskeyStore = stores.NewSqlitePasskeyStore(sqlite)
+	case b.PasskeyStore == nil:
+		config.PasskeyStore = stores.NewPasskeyStore()
+	default:
+		config.PasskeyStore = b.PasskeyStore
+	}
 	config.UserBlockedStore = userBlockedStore
 
 	// the device codes are grants: they are stored with the other grants
@@ -633,6 +727,7 @@ func (b *Builder) seedClients(clientStore domain.ClientStore) error {
 			JWKSURI:                 c.JWKSURI,
 			PublicKeys:              publicKeys,
 			GrantTypes:              c.GrantTypes,
+			AllowedGroups:           c.AllowedGroups,
 		})
 		if err != nil {
 			return fmt.Errorf("seed clients: %w", err)
@@ -710,7 +805,7 @@ func (b *Builder) validateTemplates() error {
 	for _, path := range []string{
 		b.BaseTemplateFilepath, b.LoginTemplateFilepath, b.MFACreateTemplateFilepath, b.MFAVerifyTemplateFilepath, b.LogoutTemplateFilepath,
 		b.DeviceTemplateFilepath, b.ErrorTemplateFilepath, b.ProfileTemplateFilepath, b.ProfilePasswordTemplateFilepath, b.ProfileMFATemplateFilepath,
-		b.SetupTemplateFilepath,
+		b.SetupTemplateFilepath, b.ProfilePasskeysTemplateFilepath, b.ResetPasswordTemplateFilepath,
 	} {
 		if _, err := os.Stat(path); err != nil {
 			return fmt.Errorf("template not found: %s (the paths are relative to the working directory)", path)

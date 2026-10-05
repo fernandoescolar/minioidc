@@ -32,6 +32,8 @@ type TokenHandler struct {
 	grantStore         domain.GrantStore
 	sessionStore       domain.SessionStore
 	userStore          domain.UserStore
+	userStates         domain.UserStateStore
+	events             *domain.Recorder
 	deviceCodeStore    domain.DeviceCodeStore
 	credentials        *credentials.Checker
 	authenticator      ClientAuthenticator
@@ -63,12 +65,15 @@ func NewTokenHandler(config *domain.Config, now func() time.Time, authenticator 
 		grantStore:         config.GrantStore,
 		sessionStore:       config.SessionStore,
 		userStore:          config.UserStore,
+		userStates:         config.UserStateStore,
+		events:             config.Events,
 		deviceCodeStore:    config.DeviceCodeStore,
 		credentials: &credentials.Checker{
 			Users:      config.UserStore,
 			MFA:        config.MFACodeStore,
 			Blocked:    config.UserBlockedStore,
 			RequireMFA: config.RequireMFA,
+			States:     config.UserStateStore,
 		},
 		authenticator: authenticator,
 		endpointURL:   endpointURL,
@@ -198,6 +203,12 @@ func (h *TokenHandler) getGrant(w http.ResponseWriter, token string, grantType d
 	now := h.now()
 	if grant.HasExpired(now) || grant.Session().HasExpired(now) || grant.Client().ClientID() != client.ClientID() {
 		utils.Error(w, utils.InvalidGrant, "Invalid or expired grant", http.StatusBadRequest)
+		return nil, false
+	}
+
+	// the user may have left the allowed groups of the client since the grant
+	if !client.UserAllowed(grant.User()) {
+		utils.Error(w, utils.InvalidGrant, "The user cannot use this client", http.StatusBadRequest)
 		return nil, false
 	}
 

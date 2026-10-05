@@ -14,6 +14,7 @@ type ProfileHandler struct {
 	template   *template.Template
 	userStore  domain.UserStore
 	mfaStore   domain.MFACodeStore
+	passkeys   domain.PasskeyStore
 	adminGroup string
 	adminURL   string
 }
@@ -25,6 +26,9 @@ type profileModel struct {
 	Email             string
 	HasMFA            bool
 	CanChangePassword bool
+	// PasskeysEnabled shows the passkeys, and Passkeys is their number
+	PasskeysEnabled bool
+	Passkeys        int
 	// AdminURL is the admin web, only for the administrators
 	AdminURL string
 }
@@ -37,6 +41,9 @@ func NewProfileHandler(config *domain.Config) *ProfileHandler {
 		template:  utils.ParseTemplates(config.BasePath, config.BaseTemplateFilepath, config.ProfileTemplateFilepath),
 		userStore: config.UserStore,
 		mfaStore:  config.MFACodeStore,
+	}
+	if config.PasskeysEnabled {
+		h.passkeys = config.PasskeyStore
 	}
 	if config.AdminEnabled {
 		h.adminGroup = config.AdminGroup
@@ -68,6 +75,11 @@ func (h *ProfileHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Email:             data.Email,
 		HasMFA:            hasMFA,
 		CanChangePassword: canChangePassword(h.userStore, user),
+	}
+	if h.passkeys != nil {
+		passkeys, _ := h.passkeys.ListPasskeys(user.ID())
+		model.PasskeysEnabled = true
+		model.Passkeys = len(passkeys)
 	}
 	if h.adminURL != "" && user.InGroup(h.adminGroup) {
 		model.AdminURL = h.adminURL

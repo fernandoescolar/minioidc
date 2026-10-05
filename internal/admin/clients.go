@@ -18,6 +18,7 @@ type clientDTO struct {
 	JWKSURI                 string   `json:"jwks_uri"`
 	PublicKeys              []string `json:"public_keys"`
 	GrantTypes              []string `json:"grant_types"`
+	AllowedGroups           []string `json:"allowed_groups"`
 	HasSecret               bool     `json:"has_secret"`
 	// Secret is only returned once: when it is generated
 	Secret string `json:"secret,omitempty"`
@@ -33,6 +34,7 @@ type clientInput struct {
 	JWKSURI                 string   `json:"jwks_uri"`
 	PublicKeys              []string `json:"public_keys"`
 	GrantTypes              []string `json:"grant_types"`
+	AllowedGroups           []string `json:"allowed_groups"`
 }
 
 func clientToDTO(data domain.ClientData) clientDTO {
@@ -51,6 +53,7 @@ func clientToDTO(data domain.ClientData) clientDTO {
 		JWKSURI:                 data.JWKSURI,
 		PublicKeys:              keys,
 		GrantTypes:              grantTypes(data),
+		AllowedGroups:           nonNil(data.AllowedGroups),
 		HasSecret:               data.SecretHash != "" || data.Secret != "",
 	}
 }
@@ -127,6 +130,7 @@ func (h *Handler) createClient(w http.ResponseWriter, r *http.Request) {
 
 	dto := clientToDTO(data)
 	dto.Secret = secret
+	h.audit(r, domain.EventAdminClient, nil, data.ID, "created")
 	writeJSON(w, http.StatusCreated, dto)
 }
 
@@ -161,6 +165,7 @@ func (h *Handler) updateClient(w http.ResponseWriter, r *http.Request) {
 
 	dto := clientToDTO(data)
 	dto.Secret = secret
+	h.audit(r, domain.EventAdminClient, nil, data.ID, "updated")
 	writeJSON(w, http.StatusOK, dto)
 }
 
@@ -187,6 +192,7 @@ func (h *Handler) rotateClientSecret(w http.ResponseWriter, r *http.Request) {
 
 	dto := clientToDTO(data)
 	dto.Secret = secret
+	h.audit(r, domain.EventAdminClient, nil, data.ID, "secret rotated")
 	writeJSON(w, http.StatusOK, dto)
 }
 
@@ -273,6 +279,7 @@ func (h *Handler) clientData(w http.ResponseWriter, input clientInput) (domain.C
 		JWKSURI:                 jwksURI,
 		PublicKeys:              publicKeys,
 		GrantTypes:              input.GrantTypes,
+		AllowedGroups:           cleanGroups(input.AllowedGroups),
 	}, true
 }
 
@@ -322,6 +329,7 @@ func (h *Handler) deleteClient(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.audit(r, domain.EventAdminClient, nil, data.ID, "deleted")
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -336,5 +344,6 @@ func (h *Handler) revokeClientTokens(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.audit(r, domain.EventAdminClient, nil, data.ID, "tokens revoked")
 	w.WriteHeader(http.StatusNoContent)
 }

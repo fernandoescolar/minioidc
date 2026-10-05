@@ -21,6 +21,7 @@ type ProfileMFAHandler struct {
 	template    *template.Template
 	mfaStore    domain.MFACodeStore
 	userBlocked domain.UserBlockedStore
+	events      *domain.Recorder
 	pageURL     string
 }
 
@@ -52,6 +53,7 @@ func NewProfileMFAHandler(config *domain.Config, now func() time.Time, pageURL s
 		template:    utils.ParseTemplates(config.BasePath, config.BaseTemplateFilepath, config.ProfileMFATemplateFilepath),
 		mfaStore:    config.MFACodeStore,
 		userBlocked: config.UserBlockedStore,
+		events:      config.Events,
 		pageURL:     pageURL,
 	}
 }
@@ -96,12 +98,14 @@ func (h *ProfileMFAHandler) postHTTP(w http.ResponseWriter, r *http.Request, ses
 	// step up: the changes require a code of a current authenticator
 	if len(codes) > 0 && !verifyAnyMFA(codes, r.PostFormValue("current_code"), now) {
 		model := profileMFAModel{IV: r.PostFormValue("verification_iv")}
+		h.events.RecordUser(r, domain.EventLoginMFA, domain.ResultFailure, session.User(), "invalid code of a current authenticator in the profile")
 		model.TooManyAttempts = h.userBlocked.AddFailedAttempt(blockKey, now)
 		model.InvalidCurrentCode = !model.TooManyAttempts
 		h.render(w, r, session, model)
 		return
 	}
 
+	event := domain.EventMFAAdd
 	switch r.PostFormValue("action") {
 	case "add":
 		secret := r.PostFormValue("verification_iv")
@@ -119,6 +123,7 @@ func (h *ProfileMFAHandler) postHTTP(w http.ResponseWriter, r *http.Request, ses
 			return
 		}
 	case "delete":
+		event = domain.EventMFARemove
 		if err := h.mfaStore.DeleteMFACode(userID, r.PostFormValue("id")); err != nil {
 			h.render(w, r, session, profileMFAModel{UnknownError: true})
 			return
@@ -129,6 +134,7 @@ func (h *ProfileMFAHandler) postHTTP(w http.ResponseWriter, r *http.Request, ses
 	}
 
 	h.userBlocked.Reset(blockKey)
+	h.events.RecordUser(r, event, domain.ResultSuccess, session.User(), "")
 	// Post/Redirect/Get: a reload does not submit the form again
 	http.Redirect(w, r, h.pageURL+"?success=1", http.StatusSeeOther)
 }

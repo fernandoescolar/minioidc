@@ -7,6 +7,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -30,10 +31,10 @@ func withAdmin(database string) func(*api.Builder) {
 	}
 }
 
-func newAdminServer(t *testing.T) (*testServer, string) {
+func newAdminServer(t *testing.T, options ...func(*api.Builder)) (*testServer, string) {
 	t.Helper()
 	database := t.TempDir() + "/admin.sqlite3"
-	return newTestServer(t, false, withAdmin(database)), database
+	return newTestServer(t, false, append([]func(*api.Builder){withAdmin(database)}, options...)...), database
 }
 
 func (s *testServer) loginAs(t *testing.T, user string) *adminClient {
@@ -75,6 +76,18 @@ func (a *adminClient) call(method, path string, body interface{}, status int, re
 		if err := json.Unmarshal([]byte(text), result); err != nil {
 			a.t.Fatalf("invalid JSON %s: %v", text, err)
 		}
+	}
+}
+
+// listUsers reads the first page of the users
+func (a *adminClient) listUsers(result interface{}) {
+	a.t.Helper()
+	var page struct {
+		Users json.RawMessage `json:"users"`
+	}
+	a.call(http.MethodGet, "/users", nil, http.StatusOK, &page)
+	if err := json.Unmarshal(page.Users, result); err != nil {
+		a.t.Fatalf("invalid users %s: %v", page.Users, err)
 	}
 }
 
@@ -126,7 +139,7 @@ func TestAdminManagesUsers(t *testing.T) {
 	admin := s.loginAs(t, username)
 
 	var users []map[string]interface{}
-	admin.call(http.MethodGet, "/users", nil, http.StatusOK, &users)
+	admin.listUsers(&users)
 	if len(users) != 2 {
 		t.Fatalf("Expected the 2 users of the configuration: %v", users)
 	}
@@ -328,5 +341,87 @@ func TestAdminRequiresClientsInSQLite(t *testing.T) {
 	b := &api.Builder{Issuer: issuer, Audience: audience, AdminEnabled: true}
 	if _, err := b.Build(); err == nil {
 		t.Fatal("Expected an error without the clients in SQLite")
+	}
+}
+
+func TestAdminSearchesUsers(t *testing.T) {
+	s, _ := newAdminServer(t)
+	admin := s.loginAs(t, username)
+	for i := range 12 {
+		admin.call(http.MethodPost, "/users", map[string]interface{}{
+			"preferred_username": fmt.Sprintf("member%02d", i), "password": "12345678", "groups": []string{"team"},
+		}, http.StatusCreated, nil)
+	}
+	admin.call(http.MethodPost, "/users/2/disable", map[string]string{}, http.StatusOK, nil)
+
+	type page struct {
+		Users []struct {
+			PreferredUsername string `json:"preferred_username"`
+		} `json:"users"`
+		Total int `json:"total"`
+	}
+	search := func(query string) page {
+		t.Helper()
+		var p page
+		admin.call(http.MethodGet, "/users?"+query, nil, http.StatusOK, &p)
+		return p
+	}
+
+	if p := search(""); p.Total != 14 || len(p.Users) != 14 {
+		t.Errorf("Expected all the users, got %d of %d", len(p.Users), p.Total)
+	}
+
+	// the pages keep the order of the store
+	first, second := search("q=member&limit=5"), search("q=member&limit=5&offset=10")
+	if first.Total != 12 || len(first.Users) != 5 || first.Users[0].PreferredUsername != "member00" {
+		t.Errorf("Unexpected first page: %+v", first)
+	}
+	if second.Total != 12 || len(second.Users) != 2 || second.Users[1].PreferredUsername != "member11" {
+		t.Errorf("Unexpected last page: %+v", second)
+	}
+
+	for query, expected := range map[string]string{
+		"q=TEAM&limit=1":  "member00", // the groups too
+		"status=disabled": "other",
+		"status=admin":    username,
+	} {
+		if p := search(query); len(p.Users) != 1 || p.Users[0].PreferredUsername != expected {
+			t.Errorf("%s: expected %s, got %+v", query, expected, p)
+		}
+	}
+	if p := search("status=no_mfa"); p.Total != 14 {
+		t.Errorf("Expected all the users without MFA, got %d", p.Total)
+	}
+	admin.call(http.MethodGet, "/users?status=unknown", nil, http.StatusBadRequest, nil)
+	admin.call(http.MethodGet, "/users?limit=-1", nil, http.StatusBadRequest, nil)
+}
+
+func TestAdminOverview(t *testing.T) {
+	s, _ := newAdminServer(t)
+	admin := s.loginAs(t, username)
+	s.expectLoginError(t, "other", "wrong", "")
+	admin.call(http.MethodPost, "/users/2/lock", map[string]string{}, http.StatusOK, nil)
+
+	var overview struct {
+		Users struct {
+			Total         int `json:"total"`
+			Admins        int `json:"admins"`
+			Locked        int `json:"locked"`
+			NeverSignedIn int `json:"never_signed_in"`
+		} `json:"users"`
+		Clients   int            `json:"clients"`
+		Groups    int            `json:"groups"`
+		Activity  map[string]int `json:"activity"`
+		Incidents []eventDTO     `json:"incidents"`
+	}
+	admin.call(http.MethodGet, "/overview", nil, http.StatusOK, &overview)
+	if overview.Users.Total != 2 || overview.Users.Admins != 1 || overview.Users.Locked != 1 || overview.Users.NeverSignedIn != 1 {
+		t.Errorf("Unexpected users: %+v", overview.Users)
+	}
+	if overview.Clients != 3 || overview.Groups != 1 || overview.Activity["failed_logins"] != 1 {
+		t.Errorf("Unexpected overview: %+v", overview)
+	}
+	if len(overview.Incidents) != 1 || overview.Incidents[0].Username != "other" {
+		t.Errorf("Expected the failed login as incident: %+v", overview.Incidents)
 	}
 }

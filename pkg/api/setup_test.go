@@ -31,7 +31,7 @@ func newSetupServer(t *testing.T, requireMFA bool) *testServer {
 
 func expectRedirectTo(t *testing.T, resp *http.Response, path string) {
 	t.Helper()
-	if resp.StatusCode != http.StatusFound {
+	if resp.StatusCode != http.StatusFound && resp.StatusCode != http.StatusSeeOther {
 		t.Fatalf("Expected a redirect to %s, got %d", path, resp.StatusCode)
 	}
 	if location := resp.Header.Get("Location"); !strings.HasPrefix(location, path) {
@@ -123,7 +123,7 @@ func TestSetupCreatesTheFirstAdministrator(t *testing.T) {
 	expectStatus(t, resp, body, http.StatusOK)
 
 	var users []struct{}
-	admin.call(http.MethodGet, "/users", nil, http.StatusOK, &users)
+	admin.listUsers(&users)
 	if len(users) != 1 {
 		t.Errorf("Expected only the administrator, got %d users", len(users))
 	}

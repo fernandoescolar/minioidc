@@ -65,6 +65,9 @@ type ClientData struct {
 	// GrantTypes are the grant types the client can use. If it is empty, the
 	// client can use authorization_code and refresh_token.
 	GrantTypes []string
+	// AllowedGroups are the groups whose members can use the client. If it is
+	// empty, all the users can use it.
+	AllowedGroups []string
 }
 
 // DefaultGrantTypes are the grant types of the clients without grant_types
@@ -100,6 +103,10 @@ type Client interface {
 
 	// PostLogoutRedirectURLIsValid returns true if the passed URL is allowed after logout
 	PostLogoutRedirectURLIsValid(string) bool
+
+	// UserAllowed returns true if the user can sign in to the client (it is
+	// member of one of its allowed groups, or the client has none)
+	UserAllowed(user User) bool
 }
 
 // ValidateClientData checks that the client has the credentials its authentication method needs
@@ -223,6 +230,20 @@ func (c *client) RedirectURLIsValid(url string) bool {
 // as post logout redirect URL for this Client
 func (c *client) PostLogoutRedirectURLIsValid(url string) bool {
 	return contains(c.data.PostLogoutRedirectURIs, url)
+}
+
+func (c *client) UserAllowed(user User) bool {
+	if len(c.data.AllowedGroups) == 0 {
+		return true
+	}
+
+	for _, group := range c.data.AllowedGroups {
+		if user.InGroup(group) {
+			return true
+		}
+	}
+
+	return false
 }
 
 func contains(list []string, value string) bool {

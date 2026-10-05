@@ -8,7 +8,7 @@
 @import "../../theme/components.css";
 @source "../../../templates";
 /* all the components are compiled, so the custom templates can use them */
-@source inline("{,dark:}{btn,btn-primary,btn-secondary,btn-danger,btn-ghost,btn-block,input,code-input,label,hint,card,badge,alert,alert-error,alert-success,alert-warning,alert-info,link,brand-mark,page,page-brand,page-card,page-title,page-subtitle,page-footer,stack,menu,menu-item,qr,secret,step,step-done}");
+@source inline("{,dark:}{btn,btn-primary,btn-secondary,btn-danger,btn-ghost,btn-block,input,code-input,label,hint,card,badge,alert,alert-error,alert-success,alert-warning,alert-info,link,brand-mark,page,page-brand,page-card,page-title,page-subtitle,page-footer,stack,menu,menu-item,qr,secret,step,step-done,divider}");
 
 @layer base {
   html {
@@ -79,4 +79,9 @@
 
 @utility step-done {
   @apply bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300;
+}
+
+/* a horizontal line with a text in the middle (e.g. "or") */
+@utility divider {
+  @apply flex items-center gap-3 text-xs tracking-wide text-slate-400 uppercase before:h-px before:flex-1 before:bg-slate-200 after:h-px after:flex-1 after:bg-slate-200 dark:text-slate-500 dark:before:bg-slate-800 dark:after:bg-slate-800;
 }

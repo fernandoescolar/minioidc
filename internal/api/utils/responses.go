@@ -16,6 +16,9 @@ const (
 	UnsupportedResponse  = "unsupported_response_type"
 	InvalidToken         = "invalid_token"
 	ServerError          = "server_error"
+	// AccessDenied is the error of the authorization endpoint when the user
+	// cannot use the client (RFC 6749 section 4.1.2.1)
+	AccessDenied = "access_denied"
 
 	LoginRequired          = "login_required"
 	InteractionRequired    = "interaction_required"

@@ -21,6 +21,7 @@ type MFACreateHandler struct {
 	mfaStore       domain.MFACodeStore
 	sessionStore   domain.SessionStore
 	userBlocked    domain.UserBlockedStore
+	events         *domain.Recorder
 	home           string
 }
 
@@ -46,6 +47,7 @@ func NewMfaCreateHandler(config *domain.Config, now func() time.Time, verifyEndp
 		mfaStore:       config.MFACodeStore,
 		sessionStore:   config.SessionStore,
 		userBlocked:    config.UserBlockedStore,
+		events:         config.Events,
 		home:           config.BasePath + "/",
 	}
 }
@@ -137,6 +139,7 @@ func (h *MFACreateHandler) postHTTP(w http.ResponseWriter, r *http.Request, sess
 	}
 
 	h.userBlocked.Reset(blockKey)
+	h.events.RecordUser(r, domain.EventMFAAdd, domain.ResultSuccess, session.User(), "enrolled in the login")
 	http.Redirect(w, r, utils.GetReturnURL(r, h.home), http.StatusFound)
 }
 

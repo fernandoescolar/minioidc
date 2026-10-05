@@ -57,3 +57,36 @@ func TestDeviceCodesAreSharedBetweenInstances(t *testing.T) {
 	resp, body = postForm(t, http.DefaultClient, second.url("/connect/token"), poll)
 	expectError(t, resp, body, http.StatusBadRequest, "invalid_grant")
 }
+
+// a user out of the allowed groups of the device client is told in the
+// device page, and the device stops waiting
+func TestDeviceWithAllowedGroups(t *testing.T) {
+	s := newTestServer(t, false, func(b *api.Builder) {
+		b.Clients = append(b.Clients, api.Client{ID: "tv", GrantTypes: []string{"urn:ietf:params:oauth:grant-type:device_code"}, AllowedGroups: []string{"family"}})
+	})
+
+	resp, body := postForm(t, http.DefaultClient, s.url("/connect/deviceauthorization"), url.Values{"client_id": {"tv"}})
+	expectStatus(t, resp, body, http.StatusOK)
+	var device struct {
+		DeviceCode string `json:"device_code"`
+		UserCode   string `json:"user_code"`
+	}
+	if err := json.Unmarshal([]byte(body), &device); err != nil {
+		t.Fatal(err)
+	}
+
+	c := s.loginAs(t, username).http
+	resp, body = get(t, c, s.url("/connect/device?user_code="+url.QueryEscape(device.UserCode)))
+	expectStatus(t, resp, body, http.StatusOK)
+	resp, body = postForm(t, c, s.url("/connect/device"), url.Values{
+		"user_code": {device.UserCode}, "action": {"approve"}, "__csrf": {csrfRegex.FindStringSubmatch(body)[1]},
+	})
+	expectStatus(t, resp, body, http.StatusOK)
+	if !regexp.MustCompile(`cannot use this application`).MatchString(body) {
+		t.Errorf("Expected the access denied message: %s", body)
+	}
+
+	poll := url.Values{"client_id": {"tv"}, "grant_type": {"urn:ietf:params:oauth:grant-type:device_code"}, "device_code": {device.DeviceCode}}
+	resp, body = postForm(t, http.DefaultClient, s.url("/connect/token"), poll)
+	expectError(t, resp, body, http.StatusBadRequest, "access_denied")
+}

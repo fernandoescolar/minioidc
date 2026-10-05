@@ -40,8 +40,11 @@ type AuthorizeHandler struct {
 	clientStore   domain.ClientStore
 	grantStore    domain.GrantStore
 	sessionStore  domain.SessionStore
+	userStates    domain.UserStateStore
+	events        *domain.Recorder
 	loginEndpoint string
 	mfaEndpoint   string
+	passwordURL   string
 }
 
 // authorizeRequest is a validated authorization request
@@ -61,7 +64,7 @@ type authorizeRequest struct {
 
 var _ http.Handler = (*AuthorizeHandler)(nil)
 
-func NewAuthorizeHandler(config *domain.Config, now func() time.Time, loginEndpoint, mfaEndpoint string) *AuthorizeHandler {
+func NewAuthorizeHandler(config *domain.Config, now func() time.Time, loginEndpoint, mfaEndpoint, passwordURL string) *AuthorizeHandler {
 	return &AuthorizeHandler{
 		now:           now,
 		issuer:        config.Issuer,
@@ -75,8 +78,11 @@ func NewAuthorizeHandler(config *domain.Config, now func() time.Time, loginEndpo
 		clientStore:   config.ClientStore,
 		grantStore:    config.GrantStore,
 		sessionStore:  config.SessionStore,
+		userStates:    config.UserStateStore,
+		events:        config.Events,
 		loginEndpoint: loginEndpoint,
 		mfaEndpoint:   mfaEndpoint,
+		passwordURL:   passwordURL,
 	}
 }
 
@@ -122,6 +128,28 @@ func (h *AuthorizeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		location := h.mfaEndpoint + "?return_url=" + url.QueryEscape(authorizeURL(r, req.params))
 		http.Redirect(w, r, location, http.StatusFound)
+		return
+	}
+
+	// a temporary password must be changed before using the applications
+	if state, err := h.userStates.GetUserState(session.User().ID()); err != nil || (state.PasswordChangeRequired && !session.Passkey()) {
+		if req.prompt[promptNone] {
+			h.redirectError(w, r, req, utils.InteractionRequired, "The user must change the password")
+			return
+		}
+
+		location := h.passwordURL + "?return_url=" + url.QueryEscape(authorizeURL(r, req.params))
+		http.Redirect(w, r, location, http.StatusFound)
+		return
+	}
+
+	// the client can be restricted to some groups
+	if user := session.User(); !req.client.UserAllowed(user) {
+		h.events.Record(r, domain.Event{
+			Type: domain.EventLoginDenied, Result: domain.ResultFailure, UserID: user.ID(),
+			Username: user.Data().PreferredUsername, ClientID: req.client.ClientID(), Detail: "not in the allowed groups of the client",
+		})
+		h.redirectError(w, r, req, utils.AccessDenied, "The user cannot use this application")
 		return
 	}
 
@@ -321,6 +349,12 @@ func (h *AuthorizeHandler) currentSession(r *http.Request) domain.Session {
 
 	session, err := h.sessionStore.GetSessionByID(sessionID)
 	if err != nil || session.HasExpired(h.now()) {
+		return nil
+	}
+
+	// the sessions of the disabled or locked accounts are not valid
+	if err := domain.CheckSignIn(h.userStates, session.User().ID(), h.now()); err != nil {
+		_ = h.sessionStore.DeleteSession(session.ID())
 		return nil
 	}
 
